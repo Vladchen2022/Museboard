@@ -1,0 +1,22 @@
+[package]
+name = "museboard"
+version = "0.1.0"
+description = "Museboard desktop app"
+authors = ["Museboard"]
+edition = "2021"
+
+[lib]
+name = "museboard_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+base64 = "0.22"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-dialog = "2"
+tokio = { version = "1", features = ["time"] }
