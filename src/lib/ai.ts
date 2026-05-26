@@ -4,6 +4,7 @@ import { isTauriRuntime } from "./storage";
 import { getTemplateTree } from "./templates";
 import { creationTypeLabel } from "./i18n";
 import { getNodePath, getSiblingNodes, treeToText } from "./tree";
+import { fetchWithTimeout } from "./http";
 
 interface ChatResponse {
   choices?: Array<{
@@ -257,18 +258,22 @@ async function browserChatContent(
   system: string,
   user: string,
 ): Promise<string> {
-  const response = await fetch(`${browserEndpoint(endpoint)}/chat/completions`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: settings.model,
-      temperature: settings.temperature,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-    }),
-  });
+  const response = await fetchWithTimeout(
+    `${browserEndpoint(endpoint)}/chat/completions`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: settings.model,
+        temperature: settings.temperature,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+      }),
+    },
+    120000,
+  );
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");

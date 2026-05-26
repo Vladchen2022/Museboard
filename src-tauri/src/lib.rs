@@ -31,6 +31,12 @@ struct ComfyGeneratedImage {
 }
 
 #[derive(Serialize)]
+struct AssetData {
+    mime_type: String,
+    data_base64: String,
+}
+
+#[derive(Serialize)]
 struct ComfyWorkflowPreset {
     workflow_json: String,
     positive_prompt_node_id: String,
@@ -50,12 +56,46 @@ struct ComfyWorkflowPreset {
 fn save_project(project_dir: String, project_json: String) -> Result<(), String> {
     let dir = PathBuf::from(project_dir);
     fs::create_dir_all(dir.join("assets")).map_err(to_string)?;
-    fs::write(dir.join(PROJECT_FILE), project_json).map_err(to_string)
+    let target = dir.join(PROJECT_FILE);
+    let temp = dir.join(format!("{PROJECT_FILE}.tmp"));
+    fs::write(&temp, project_json).map_err(to_string)?;
+    fs::rename(temp, target).map_err(to_string)
 }
 
 #[tauri::command]
 fn open_project(project_dir: String) -> Result<String, String> {
     fs::read_to_string(PathBuf::from(project_dir).join(PROJECT_FILE)).map_err(to_string)
+}
+
+#[tauri::command]
+fn read_project_asset(project_dir: String, relative_path: String) -> Result<AssetData, String> {
+    let project_dir = PathBuf::from(project_dir)
+        .canonicalize()
+        .map_err(|error| format!("项目目录不存在：{error}"))?;
+    let assets_dir = project_dir
+        .join("assets")
+        .canonicalize()
+        .map_err(|error| format!("项目 assets 目录不存在：{error}"))?;
+    let relative_path = Path::new(relative_path.trim());
+
+    if relative_path.is_absolute() {
+        return Err("图片路径必须是项目内相对路径。".to_string());
+    }
+
+    let target = project_dir
+        .join(relative_path)
+        .canonicalize()
+        .map_err(|error| format!("图片文件不存在：{error}"))?;
+
+    if !target.starts_with(&assets_dir) {
+        return Err("拒绝读取项目 assets 目录之外的文件。".to_string());
+    }
+
+    let bytes = fs::read(&target).map_err(to_string)?;
+    Ok(AssetData {
+        mime_type: mime_from_path(&target).to_string(),
+        data_base64: general_purpose::STANDARD.encode(bytes),
+    })
 }
 
 #[tauri::command]
@@ -86,36 +126,7 @@ fn import_asset(
 #[tauri::command]
 async fn import_remote_asset(project_dir: String, url: String) -> Result<ImportedAsset, String> {
     let url = url.trim();
-    if !(url.starts_with("http://") || url.starts_with("https://")) {
-        return Err("只支持拖入 http/https 图片链接。".to_string());
-    }
-
-    let response = reqwest::get(url)
-        .await
-        .map_err(|error| format!("下载网络图片失败：{error}"))?;
-    if !response.status().is_success() {
-        return Err(format!("下载网络图片失败：HTTP {}", response.status()));
-    }
-
-    let mime_type = response
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("application/octet-stream")
-        .split(';')
-        .next()
-        .unwrap_or("application/octet-stream")
-        .trim()
-        .to_string();
-
-    if !mime_type.starts_with("image/") {
-        return Err(format!("链接不是图片资源：{mime_type}"));
-    }
-
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|error| format!("读取网络图片失败：{error}"))?;
+    let (mime_type, bytes) = download_image_bytes(url).await?;
     let dir = PathBuf::from(project_dir);
     let assets_dir = dir.join("assets");
     fs::create_dir_all(&assets_dir).map_err(to_string)?;
@@ -130,6 +141,15 @@ async fn import_remote_asset(project_dir: String, url: String) -> Result<Importe
         relative_path: format!("assets/{safe_name}"),
         absolute_path: target.to_string_lossy().to_string(),
         mime_type,
+    })
+}
+
+#[tauri::command]
+async fn download_remote_asset(url: String) -> Result<AssetData, String> {
+    let (mime_type, bytes) = download_image_bytes(url.trim()).await?;
+    Ok(AssetData {
+        mime_type,
+        data_base64: general_purpose::STANDARD.encode(bytes),
     })
 }
 
@@ -150,7 +170,7 @@ async fn lm_studio_chat(
     }
 
     let url = format!("{endpoint}/chat/completions");
-    let client = reqwest::Client::new();
+    let client = http_client(120)?;
     let response = client
         .post(&url)
         .json(&serde_json::json!({
@@ -189,7 +209,10 @@ fn set_window_always_on_top(window: tauri::Window, always_on_top: bool) -> Resul
 async fn comfyui_check(endpoint: String) -> Result<(), String> {
     let endpoint = normalize_endpoint(&endpoint, "ComfyUI")?;
     let url = format!("{endpoint}/system_stats");
-    let response = reqwest::get(&url)
+    let client = http_client(10)?;
+    let response = client
+        .get(&url)
+        .send()
         .await
         .map_err(|error| format!("无法连接 ComfyUI：{error}。请确认 ComfyUI 已启动，默认地址是 http://127.0.0.1:8188。"))?;
 
@@ -203,12 +226,8 @@ async fn comfyui_check(endpoint: String) -> Result<(), String> {
 #[tauri::command]
 fn comfyui_start(working_dir: String, launch_command: String) -> Result<(), String> {
     let working_dir = expand_home(working_dir.trim());
-    let launch_command = launch_command.trim();
     if working_dir.trim().is_empty() {
         return Err("未配置 ComfyUI 工作目录。".to_string());
-    }
-    if launch_command.is_empty() {
-        return Err("未配置 ComfyUI 启动命令。".to_string());
     }
 
     let dir = PathBuf::from(&working_dir);
@@ -216,9 +235,11 @@ fn comfyui_start(working_dir: String, launch_command: String) -> Result<(), Stri
         return Err(format!("ComfyUI 工作目录不存在：{working_dir}"));
     }
 
-    Command::new("/bin/zsh")
-        .arg("-lc")
-        .arg(launch_command)
+    let args = parse_launch_command(&launch_command)?;
+    let program = resolve_launch_program(&dir, &args[0]);
+
+    Command::new(program)
+        .args(&args[1..])
         .current_dir(&dir)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -232,7 +253,10 @@ fn comfyui_start(working_dir: String, launch_command: String) -> Result<(), Stri
 #[tauri::command]
 async fn comfyui_default_workflow(endpoint: String) -> Result<ComfyWorkflowPreset, String> {
     let endpoint = normalize_endpoint(&endpoint, "ComfyUI")?;
-    let response = reqwest::get(format!("{endpoint}/object_info/CheckpointLoaderSimple"))
+    let client = http_client(15)?;
+    let response = client
+        .get(format!("{endpoint}/object_info/CheckpointLoaderSimple"))
+        .send()
         .await
         .map_err(|error| format!("无法读取 ComfyUI checkpoint 列表：{error}"))?;
 
@@ -330,7 +354,7 @@ async fn comfyui_generate(
         height,
     )?;
 
-    let client = reqwest::Client::new();
+    let client = http_client(30)?;
     let client_id = format!("museboard-{}", unix_millis());
     let response = client
         .post(format!("{endpoint}/prompt"))
@@ -368,8 +392,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             save_project,
             open_project,
+            read_project_asset,
             import_asset,
             import_remote_asset,
+            download_remote_asset,
             lm_studio_chat,
             set_window_always_on_top,
             comfyui_check,
@@ -417,6 +443,127 @@ fn expand_home(value: &str) -> String {
         }
     }
     value.to_string()
+}
+
+fn parse_launch_command(command: &str) -> Result<Vec<String>, String> {
+    let trimmed = command.trim();
+    if trimmed.is_empty() {
+        return Err("未配置 ComfyUI 启动命令。".to_string());
+    }
+
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+
+    for ch in trimmed.chars() {
+        if escaped {
+            current.push(ch);
+            escaped = false;
+            continue;
+        }
+
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+
+        if let Some(quote_char) = quote {
+            if ch == quote_char {
+                quote = None;
+            } else {
+                current.push(ch);
+            }
+            continue;
+        }
+
+        if matches!(ch, '\'' | '"') {
+            quote = Some(ch);
+            continue;
+        }
+
+        if ch.is_whitespace() {
+            if !current.is_empty() {
+                args.push(current);
+                current = String::new();
+            }
+            continue;
+        }
+
+        if matches!(ch, ';' | '|' | '&' | '<' | '>' | '`' | '$' | '(' | ')') {
+            return Err(
+                "ComfyUI 启动命令只支持程序和参数，不支持 shell 管道、重定向、变量或命令拼接。"
+                    .to_string(),
+            );
+        }
+
+        current.push(ch);
+    }
+
+    if escaped {
+        return Err("ComfyUI 启动命令末尾存在未完成的转义字符。".to_string());
+    }
+    if quote.is_some() {
+        return Err("ComfyUI 启动命令存在未闭合的引号。".to_string());
+    }
+    if !current.is_empty() {
+        args.push(current);
+    }
+    if args.is_empty() {
+        return Err("未配置 ComfyUI 启动命令。".to_string());
+    }
+
+    Ok(args)
+}
+
+fn resolve_launch_program(working_dir: &Path, program: &str) -> PathBuf {
+    let expanded = expand_home(program);
+    let program_path = PathBuf::from(&expanded);
+    if program_path.is_absolute() {
+        return program_path;
+    }
+    if expanded.contains('/') || expanded.contains('\\') {
+        return working_dir.join(program_path);
+    }
+    PathBuf::from(expanded)
+}
+
+async fn download_image_bytes(url: &str) -> Result<(String, Vec<u8>), String> {
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Err("只支持拖入 http/https 图片链接。".to_string());
+    }
+
+    let client = http_client(30)?;
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|error| format!("下载网络图片失败：{error}"))?;
+    if !response.status().is_success() {
+        return Err(format!("下载网络图片失败：HTTP {}", response.status()));
+    }
+
+    let mime_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("application/octet-stream")
+        .split(';')
+        .next()
+        .unwrap_or("application/octet-stream")
+        .trim()
+        .to_string();
+
+    if !mime_type.starts_with("image/") {
+        return Err(format!("链接不是图片资源：{mime_type}"));
+    }
+
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|error| format!("读取网络图片失败：{error}"))?;
+
+    Ok((mime_type, bytes.to_vec()))
 }
 
 fn unique_file_name(dir: &Path, safe_name: &str) -> String {
@@ -473,8 +620,35 @@ fn extension_from_mime(mime_type: &str) -> &'static str {
     }
 }
 
+fn mime_from_path(path: &Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "jpg" | "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
+        "bmp" => "image/bmp",
+        "tif" | "tiff" => "image/tiff",
+        "avif" => "image/avif",
+        "heic" => "image/heic",
+        _ => "application/octet-stream",
+    }
+}
+
 fn to_string(error: std::io::Error) -> String {
     error.to_string()
+}
+
+fn http_client(timeout_seconds: u64) -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(timeout_seconds))
+        .build()
+        .map_err(|error| format!("创建 HTTP client 失败：{error}"))
 }
 
 fn extract_chat_content(body: &str) -> Result<String, String> {
@@ -603,7 +777,10 @@ fn set_workflow_input(
 }
 
 async fn fetch_comfy_object_info(endpoint: &str, node_type: &str) -> Result<Value, String> {
-    let response = reqwest::get(format!("{endpoint}/object_info/{node_type}"))
+    let client = http_client(15)?;
+    let response = client
+        .get(format!("{endpoint}/object_info/{node_type}"))
+        .send()
         .await
         .map_err(|error| format!("无法读取 ComfyUI 节点 {node_type}：{error}"))?;
     let status = response.status();
@@ -994,6 +1171,7 @@ mod tests {
 
         assert_eq!(loaded, json);
         assert!(dir.join("assets").is_dir());
+        assert!(!dir.join(format!("{PROJECT_FILE}.tmp")).exists());
 
         let _ = fs::remove_dir_all(dir);
     }
@@ -1015,6 +1193,31 @@ mod tests {
     }
 
     #[test]
+    fn reads_only_assets_inside_project_directory() {
+        let dir = temp_project_dir();
+        let assets_dir = dir.join("assets");
+        fs::create_dir_all(&assets_dir).unwrap();
+        fs::write(assets_dir.join("reference.png"), [137, 80, 78, 71]).unwrap();
+        fs::write(dir.join("project.museboard.json"), "{}").unwrap();
+
+        let data = read_project_asset(
+            dir.to_string_lossy().to_string(),
+            "assets/reference.png".to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(data.mime_type, "image/png");
+        assert_eq!(data.data_base64, general_purpose::STANDARD.encode([137, 80, 78, 71]));
+        assert!(read_project_asset(
+            dir.to_string_lossy().to_string(),
+            "assets/../project.museboard.json".to_string(),
+        )
+        .is_err());
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn extracts_lm_studio_chat_content() {
         let body = r#"{"choices":[{"message":{"content":"{\"nodes\":[]}"}}]}"#;
 
@@ -1031,6 +1234,34 @@ mod tests {
             file_name_from_url("https://example.com/path/reference.jpg?size=large", "image/jpeg"),
             "reference.jpg"
         );
+    }
+
+    #[test]
+    fn parses_comfy_launch_command_without_shell() {
+        assert_eq!(
+            parse_launch_command(".venv/bin/python main.py --listen 127.0.0.1 --port 8188")
+                .unwrap(),
+            vec![
+                ".venv/bin/python",
+                "main.py",
+                "--listen",
+                "127.0.0.1",
+                "--port",
+                "8188"
+            ]
+        );
+        assert_eq!(
+            parse_launch_command(r#""/Users/me/Comfy UI/.venv/bin/python" main.py"#).unwrap(),
+            vec!["/Users/me/Comfy UI/.venv/bin/python", "main.py"]
+        );
+    }
+
+    #[test]
+    fn rejects_shell_syntax_in_comfy_launch_command() {
+        assert!(parse_launch_command("python main.py; rm -rf ~/Pictures").is_err());
+        assert!(parse_launch_command("python main.py | tee log.txt").is_err());
+        assert!(parse_launch_command("python main.py $EXTRA").is_err());
+        assert!(parse_launch_command(r#""python main.py"#).is_err());
     }
 
     fn temp_project_dir() -> PathBuf {

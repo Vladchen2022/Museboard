@@ -17,19 +17,35 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   Annotation,
   AnnotationTool,
-  Asset,
   CanvasLayout,
   Language,
   LayoutItem,
   MuseProject,
 } from "../types";
-import { createId } from "../lib/id";
+import {
+  annotationBounds,
+  boxesIntersect,
+  createAnnotation,
+  expandedViewportBox,
+  getDroppedImageFiles,
+  getDroppedImageUrls,
+  isItemNearViewport,
+  moveAnnotations,
+  moveLayoutItems,
+  normalizedBox,
+  resizeAnnotation,
+  updateDrawnAnnotation,
+} from "../lib/canvas";
+import { AnnotationView } from "./canvas/AnnotationView";
+import { AssetView } from "./canvas/AssetView";
 import { t } from "../lib/i18n";
-import { assetDisplaySrc } from "../lib/storage";
 import { ensureLayout, getVisibleAssetIds, touchProject } from "../lib/tree";
+
+const IMAGE_LOAD_MARGIN = 520;
 
 interface CanvasProps {
   project: MuseProject;
+  projectDir: string | null;
   language: Language;
   selectedNodeId: string;
   tool: AnnotationTool;
@@ -100,6 +116,7 @@ const toolOptions: Array<{ tool: AnnotationTool; label: string; icon: ReactNode 
 
 export function Canvas({
   project,
+  projectDir,
   language,
   selectedNodeId,
   tool,
@@ -121,6 +138,9 @@ export function Canvas({
   const [selectedAnnotationIds, setSelectedAnnotationIds] = useState<string[]>([]);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [draftLayout, setDraftLayout] = useState<CanvasLayout | null>(null);
+  const [viewportBox, setViewportBox] = useState(() =>
+    expandedViewportBox({ scrollLeft: 0, scrollTop: 0, clientWidth: 0, clientHeight: 0 }, IMAGE_LOAD_MARGIN),
+  );
   const node = project.nodes[selectedNodeId];
   const committedLayout = ensureLayout(project, selectedNodeId);
   const layout = draftLayout ?? committedLayout;
@@ -144,6 +164,17 @@ export function Canvas({
         x: Math.round(rect.left + rect.width / 2),
         y: Math.round(rect.top + rect.height / 2),
       });
+      setViewportBox(
+        expandedViewportBox(
+          {
+            scrollLeft: activeViewport.scrollLeft,
+            scrollTop: activeViewport.scrollTop,
+            clientWidth: activeViewport.clientWidth,
+            clientHeight: activeViewport.clientHeight,
+          },
+          IMAGE_LOAD_MARGIN,
+        ),
+      );
     }
 
     updateEmptyPromptCenter();
@@ -627,17 +658,16 @@ export function Canvas({
             const asset = project.assets[assetId];
             if (!asset) return null;
             const item = defaultLayoutItem(assetId, index);
+            const shouldLoad = isItemNearViewport(item, viewportBox);
             return (
               <AssetView
                 key={assetId}
                 asset={asset}
+                projectDir={projectDir}
+                shouldLoad={shouldLoad}
                 language={language}
                 item={item}
                 selected={selectedAssetIds.includes(assetId)}
-                onSelect={() => {
-                  setSelectedAssetIds([assetId]);
-                  setSelectedAnnotationIds([]);
-                }}
                 onMoveStart={(event) => {
                   event.stopPropagation();
                   const movingAssetIds = selectedAssetIds.includes(assetId)
@@ -758,59 +788,6 @@ export function Canvas({
   );
 }
 
-function getDroppedImageFiles(dataTransfer: DataTransfer): File[] {
-  const files = Array.from(dataTransfer.files).filter(isImageFile);
-  if (files.length) return files;
-
-  return Array.from(dataTransfer.items)
-    .filter((item) => item.kind === "file")
-    .map((item) => item.getAsFile())
-    .filter((file): file is File => Boolean(file && isImageFile(file)));
-}
-
-function isImageFile(file: File): boolean {
-  return (
-    file.type.startsWith("image/") ||
-    /\.(png|jpe?g|webp|gif|bmp|tiff?|avif|heic)$/i.test(file.name)
-  );
-}
-
-function getDroppedImageUrls(dataTransfer: DataTransfer): string[] {
-  const rawValues = [
-    dataTransfer.getData("text/uri-list"),
-    dataTransfer.getData("text/plain"),
-    extractImageSrcFromHtml(dataTransfer.getData("text/html")),
-  ];
-
-  return Array.from(
-    new Set(
-      rawValues
-        .flatMap((value) => value.split(/\r?\n/))
-        .map((value) => value.trim())
-        .filter((value) => value && !value.startsWith("#"))
-        .filter(isImageUrl),
-    ),
-  );
-}
-
-function extractImageSrcFromHtml(html: string): string {
-  if (!html.trim()) return "";
-  const match = html.match(/<img[^>]+src=["']([^"']+)["']/i);
-  return match?.[1] ?? "";
-}
-
-function isImageUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return (
-      ["http:", "https:", "data:"].includes(url.protocol) &&
-      (url.protocol === "data:" || /\.(png|jpe?g|webp|gif|bmp|tiff?|avif|heic)(\?.*)?$/i.test(url.pathname))
-    );
-  } catch {
-    return false;
-  }
-}
-
 function toolLabel(tool: AnnotationTool, language: Language): string {
   const keys: Record<AnnotationTool, "select" | "rect" | "arrow" | "text" | "pen"> = {
     select: "select",
@@ -820,312 +797,4 @@ function toolLabel(tool: AnnotationTool, language: Language): string {
     pen: "pen",
   };
   return t(language, keys[tool]);
-}
-
-interface Box {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-}
-
-function normalizedBox(startX: number, startY: number, currentX: number, currentY: number): Box {
-  return {
-    left: Math.min(startX, currentX),
-    top: Math.min(startY, currentY),
-    width: Math.abs(currentX - startX),
-    height: Math.abs(currentY - startY),
-  };
-}
-
-function boxesIntersect(
-  box: Box,
-  item: { x: number; y: number; width: number; height: number },
-): boolean {
-  return (
-    box.left < item.x + item.width &&
-    box.left + box.width > item.x &&
-    box.top < item.y + item.height &&
-    box.top + box.height > item.y
-  );
-}
-
-function moveLayoutItems(
-  currentItems: Record<string, LayoutItem>,
-  initials: Record<string, LayoutItem>,
-  dx: number,
-  dy: number,
-): Record<string, LayoutItem> {
-  const next = { ...currentItems };
-  for (const [assetId, item] of Object.entries(initials)) {
-    next[assetId] = {
-      ...item,
-      x: Math.round(item.x + dx),
-      y: Math.round(item.y + dy),
-    };
-  }
-  return next;
-}
-
-function moveAnnotations(
-  annotations: Annotation[],
-  initials: Record<string, Annotation>,
-  dx: number,
-  dy: number,
-): Annotation[] {
-  return annotations.map((annotation) => {
-    const initial = initials[annotation.id];
-    if (!initial) return annotation;
-    return {
-      ...initial,
-      x: Math.round(initial.x + dx),
-      y: Math.round(initial.y + dy),
-    };
-  });
-}
-
-function annotationBounds(annotation: Annotation): { x: number; y: number; width: number; height: number } {
-  return {
-    x: annotation.x,
-    y: annotation.y,
-    width: Math.max(1, annotation.width),
-    height: Math.max(1, annotation.height),
-  };
-}
-
-function resizeAnnotation(annotation: Annotation, dx: number, dy: number): Annotation {
-  if (annotation.kind === "arrow") {
-    const angle = (annotation.rotation * Math.PI) / 180;
-    const endX = annotation.width * Math.cos(angle) + dx;
-    const endY = annotation.width * Math.sin(angle) + dy;
-    return {
-      ...annotation,
-      width: Math.max(12, Math.round(Math.hypot(endX, endY))),
-      height: 2,
-      rotation: Math.round((Math.atan2(endY, endX) * 180) / Math.PI),
-    };
-  }
-
-  return {
-    ...annotation,
-    width: Math.max(24, Math.round(annotation.width + dx)),
-    height: Math.max(24, Math.round(annotation.height + dy)),
-  };
-}
-
-function updateDrawnAnnotation(
-  annotation: Annotation,
-  drag: Extract<DragState, { kind: "draw-annotation" }>,
-  x: number,
-  y: number,
-): Annotation {
-  if (drag.tool === "rect") {
-    const box = normalizedBox(drag.startX, drag.startY, x, y);
-    return {
-      ...annotation,
-      x: box.left,
-      y: box.top,
-      width: Math.max(8, box.width),
-      height: Math.max(8, box.height),
-    };
-  }
-
-  if (drag.tool === "arrow") {
-    const dx = x - drag.startX;
-    const dy = y - drag.startY;
-    return {
-      ...annotation,
-      x: drag.startX,
-      y: drag.startY,
-      width: Math.max(12, Math.round(Math.hypot(dx, dy))),
-      height: 2,
-      rotation: Math.round((Math.atan2(dy, dx) * 180) / Math.PI),
-    };
-  }
-
-  if (drag.tool === "pen") {
-    const absolutePoints =
-      annotation.points?.map((point) => ({
-        x: point.x + annotation.x,
-        y: point.y + annotation.y,
-      })) ?? [];
-    absolutePoints.push({ x, y });
-
-    const minX = Math.min(...absolutePoints.map((point) => point.x));
-    const minY = Math.min(...absolutePoints.map((point) => point.y));
-    const maxX = Math.max(...absolutePoints.map((point) => point.x));
-    const maxY = Math.max(...absolutePoints.map((point) => point.y));
-
-    return {
-      ...annotation,
-      x: minX,
-      y: minY,
-      width: Math.max(1, maxX - minX),
-      height: Math.max(1, maxY - minY),
-      points: absolutePoints.map((point) => ({
-        x: point.x - minX,
-        y: point.y - minY,
-      })),
-    };
-  }
-
-  return annotation;
-}
-
-function AssetView({
-  asset,
-  language,
-  item,
-  selected,
-  onSelect,
-  onMoveStart,
-  onResizeStart,
-}: {
-  asset: Asset;
-  language: Language;
-  item: LayoutItem;
-  selected: boolean;
-  onSelect: () => void;
-  onMoveStart: (event: React.PointerEvent<HTMLElement>) => void;
-  onResizeStart: (event: React.PointerEvent<HTMLElement>) => void;
-}) {
-  const [failed, setFailed] = useState(false);
-  const src = assetDisplaySrc(asset);
-
-  return (
-    <div
-      className={`assetItem ${selected ? "selected" : ""}`}
-      style={{
-        left: item.x,
-        top: item.y,
-        width: item.width,
-        height: item.height,
-        zIndex: item.z,
-        transform: `rotate(${item.rotation}deg)`,
-      }}
-      onClick={(event) => {
-        event.stopPropagation();
-      }}
-      onPointerDown={onMoveStart}
-    >
-      {failed || !src ? (
-        <div className="assetError">
-          <ImagePlus size={22} />
-          <span>{t(language, "imageReadFail")}</span>
-          <small>{asset.absolutePath ?? asset.relativePath ?? asset.originalName}</small>
-        </div>
-      ) : (
-        <img
-          src={src}
-          alt={asset.originalName}
-          draggable={false}
-          onError={() => setFailed(true)}
-          onLoad={() => setFailed(false)}
-        />
-      )}
-      <div className="assetLabel">{asset.originalName}</div>
-      <button
-        className="resizeHandle"
-        type="button"
-        title={t(language, "resize")}
-        onPointerDown={onResizeStart}
-      />
-    </div>
-  );
-}
-
-function AnnotationView({
-  annotation,
-  language,
-  selected,
-  onSelect,
-  onMoveStart,
-  onResizeStart,
-  onTextChange,
-}: {
-  annotation: Annotation;
-  language: Language;
-  selected: boolean;
-  onSelect: () => void;
-  onMoveStart: (event: React.PointerEvent<HTMLDivElement>) => void;
-  onResizeStart: (event: React.PointerEvent<HTMLButtonElement>) => void;
-  onTextChange: (text: string) => void;
-}) {
-  const isArrow = annotation.kind === "arrow";
-  const commonStyle: React.CSSProperties = {
-    left: annotation.x,
-    top: annotation.y,
-    width: isArrow ? Math.max(12, annotation.width) : annotation.width,
-    height: isArrow ? 2 : annotation.height,
-    zIndex: annotation.z,
-    color: annotation.color,
-    transform: `rotate(${annotation.rotation}deg)`,
-  };
-
-  return (
-    <div
-      className={`annotation ${annotation.kind} ${selected ? "selected" : ""}`}
-      style={commonStyle}
-      onClick={(event) => {
-        event.stopPropagation();
-        onSelect();
-      }}
-      onPointerDown={onMoveStart}
-    >
-      {annotation.kind === "text" ? (
-        <textarea
-          className="annotationTextInput"
-          value={annotation.text ?? ""}
-          placeholder={t(language, "annotationTextPlaceholder")}
-          onChange={(event) => onTextChange(event.target.value)}
-          onClick={(event) => {
-            event.stopPropagation();
-            onSelect();
-          }}
-          onPointerDown={(event) => event.stopPropagation()}
-        />
-      ) : null}
-      {annotation.kind === "arrow" ? <span className="arrowHead" /> : null}
-      {annotation.kind === "pen" ? (
-        <svg className="penStroke" viewBox={`0 0 ${annotation.width} ${annotation.height}`}>
-          <polyline
-            points={(annotation.points ?? []).map((point) => `${point.x},${point.y}`).join(" ")}
-          />
-        </svg>
-      ) : null}
-      {selected && (
-        <>
-          <span className="annotationDragHandle" title={t(language, "moveAnnotation")} />
-          {annotation.kind !== "pen" && (
-            <button
-              className="annotationResizeHandle"
-              type="button"
-              title={
-                annotation.kind === "arrow"
-                  ? t(language, "changeArrow")
-                  : t(language, "resizeAnnotation")
-              }
-              onPointerDown={onResizeStart}
-            />
-          )}
-        </>
-      )}
-    </div>
-  );
-}
-
-function createAnnotation(tool: Exclude<AnnotationTool, "select">, x: number, y: number): Annotation {
-  return {
-    id: createId("annotation"),
-    kind: tool,
-    x,
-    y,
-    width: tool === "text" ? 180 : tool === "pen" ? 1 : 20,
-    height: tool === "arrow" ? 2 : tool === "text" ? 64 : tool === "pen" ? 1 : 20,
-    rotation: 0,
-    z: 1000,
-    color: "#e24a3b",
-    text: tool === "text" ? "" : undefined,
-    points: tool === "pen" ? [{ x: 0, y: 0 }] : undefined,
-  };
 }

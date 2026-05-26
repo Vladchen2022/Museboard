@@ -299,6 +299,7 @@ export function Toolbar({
                   />
                 </label>
               </div>
+              <div className="settingsHint">{t(language, "comfyLaunchCommandHint")}</div>
               {comfyStatus && <div className="settingsHint">{comfyStatus}</div>}
 
               <div className="settingsInline">

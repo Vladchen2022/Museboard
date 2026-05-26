@@ -7,6 +7,7 @@ import type {
 } from "../types";
 import { isTauriRuntime } from "./storage";
 import { treeToText } from "./tree";
+import { fetchWithTimeout } from "./http";
 
 export interface AspectRatioOption {
   id: string;
@@ -49,7 +50,7 @@ export async function testComfyConnection(settings: ComfySettings): Promise<void
     return;
   }
 
-  const response = await fetch(`${browserEndpoint(endpoint)}/system_stats`);
+  const response = await fetchWithTimeout(`${browserEndpoint(endpoint)}/system_stats`, {}, 10000);
   if (!response.ok) {
     throw new Error(`ComfyUI HTTP ${response.status}`);
   }
@@ -143,7 +144,11 @@ export async function createDefaultComfyWorkflow(
     };
   }
 
-  const response = await fetch(`${browserEndpoint(endpoint)}/object_info/CheckpointLoaderSimple`);
+  const response = await fetchWithTimeout(
+    `${browserEndpoint(endpoint)}/object_info/CheckpointLoaderSimple`,
+    {},
+    15000,
+  );
   if (!response.ok) throw new Error(`ComfyUI HTTP ${response.status}`);
   const payload = (await response.json()) as {
     CheckpointLoaderSimple?: {
@@ -536,14 +541,18 @@ async function browserGenerateComfyImage(
 ): Promise<ComfyGeneratedImage> {
   const workflow = buildWorkflowForBrowser(settings, prompt, option);
   const clientId = `museboard-${Date.now()}`;
-  const response = await fetch(`${browserEndpoint(endpoint)}/prompt`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      client_id: clientId,
-      prompt: workflow,
-    }),
-  });
+  const response = await fetchWithTimeout(
+    `${browserEndpoint(endpoint)}/prompt`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        client_id: clientId,
+        prompt: workflow,
+      }),
+    },
+    30000,
+  );
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
@@ -554,12 +563,14 @@ async function browserGenerateComfyImage(
   if (!payload.prompt_id) throw new Error("ComfyUI did not return prompt_id.");
 
   const imageRef = await pollBrowserImage(endpoint, payload.prompt_id);
-  const imageResponse = await fetch(
+  const imageResponse = await fetchWithTimeout(
     `${browserEndpoint(endpoint)}/view?${new URLSearchParams({
       filename: imageRef.filename ?? "",
       subfolder: imageRef.subfolder ?? "",
       type: imageRef.type ?? "output",
     })}`,
+    {},
+    60000,
   );
 
   if (!imageResponse.ok) throw new Error(`ComfyUI image HTTP ${imageResponse.status}`);
@@ -644,7 +655,11 @@ async function pollBrowserImage(
   promptId: string,
 ): Promise<BrowserHistoryImage> {
   for (let index = 0; index < 180; index += 1) {
-    const response = await fetch(`${browserEndpoint(endpoint)}/history/${promptId}`);
+    const response = await fetchWithTimeout(
+      `${browserEndpoint(endpoint)}/history/${promptId}`,
+      {},
+      15000,
+    );
     if (response.ok) {
       const history = (await response.json()) as Record<
         string,
@@ -666,7 +681,11 @@ async function pollBrowserImage(
 }
 
 async function fetchComfyObjectInfo(endpoint: string, nodeType: string): Promise<unknown> {
-  const response = await fetch(`${browserEndpoint(endpoint)}/object_info/${nodeType}`);
+  const response = await fetchWithTimeout(
+    `${browserEndpoint(endpoint)}/object_info/${nodeType}`,
+    {},
+    15000,
+  );
   if (!response.ok) throw new Error(`ComfyUI ${nodeType} HTTP ${response.status}`);
   return response.json();
 }

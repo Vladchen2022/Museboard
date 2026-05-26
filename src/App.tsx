@@ -129,7 +129,8 @@ export default function App() {
         }
         setProjectDir(dir);
       }
-      await saveProject(dir, project);
+      const savedProject = await saveProject(dir, project);
+      setProject(savedProject);
       setStatus(t(language, "saved"));
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
@@ -372,6 +373,7 @@ export default function App() {
 
         <Canvas
           project={project}
+          projectDir={projectDir}
           language={language}
           selectedNodeId={selectedNodeId}
           tool={tool}

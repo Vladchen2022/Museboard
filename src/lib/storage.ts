@@ -1,4 +1,4 @@
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
   AiSettings,
@@ -18,6 +18,8 @@ declare global {
 
 const LOCAL_PROJECT_KEY = "museboard.localProject.v1";
 const LOCAL_PREFERENCES_KEY = "museboard.preferences.v1";
+const ASSET_SRC_CACHE_LIMIT = 80;
+const assetSrcCache = new Map<string, string>();
 
 const defaultAiSettings: AiSettings = {
   endpoint: "http://localhost:1234/v1",
@@ -57,8 +59,10 @@ export async function pickProjectDirectory(): Promise<string | null> {
   return typeof selected === "string" ? selected : null;
 }
 
-export async function saveProject(projectDir: string | null, project: MuseProject): Promise<void> {
-  const serializedProject = prepareProjectForStorage(project, {
+export async function saveProject(projectDir: string | null, project: MuseProject): Promise<MuseProject> {
+  const projectToSave =
+    isTauriRuntime() && projectDir ? await materializeEmbeddedAssets(projectDir, project) : project;
+  const serializedProject = prepareProjectForStorage(projectToSave, {
     embedAssetData: !isTauriRuntime() || !projectDir,
     includeRuntimeSettings: false,
   });
@@ -68,10 +72,11 @@ export async function saveProject(projectDir: string | null, project: MuseProjec
       projectDir,
       projectJson: JSON.stringify(serializedProject, null, 2),
     });
-    return;
+    return projectToSave;
   }
 
   localStorage.setItem(LOCAL_PROJECT_KEY, JSON.stringify(serializedProject));
+  return projectToSave;
 }
 
 export async function openProject(projectDir: string | null): Promise<MuseProject | null> {
@@ -208,8 +213,31 @@ export async function importAssetFile(
 
 export function assetDisplaySrc(asset: Asset): string {
   if (asset.dataUrl) return asset.dataUrl;
-  if (asset.absolutePath && isTauriRuntime()) return convertFileSrc(asset.absolutePath);
   return "";
+}
+
+export async function loadAssetDisplaySrc(
+  projectDir: string | null,
+  asset: Asset,
+): Promise<string> {
+  if (asset.dataUrl) return asset.dataUrl;
+  if (!isTauriRuntime() || !projectDir || !asset.relativePath) return "";
+
+  const cacheKey = assetDisplayCacheKey(projectDir, asset);
+  const cached = getCachedAssetSrc(cacheKey);
+  if (cached) return cached;
+
+  const data = await invoke<{
+    mime_type: string;
+    data_base64: string;
+  }>("read_project_asset", {
+    projectDir,
+    relativePath: asset.relativePath,
+  });
+
+  const src = `data:${data.mime_type || asset.mimeType};base64,${data.data_base64}`;
+  setCachedAssetSrc(cacheKey, src);
+  return src;
 }
 
 export async function importAssetUrl(
@@ -249,6 +277,22 @@ export async function importAssetUrl(
       mimeType: imported.mime_type || "image/*",
       relativePath: imported.relative_path,
       absolutePath: imported.absolute_path,
+      createdAt,
+    };
+  }
+
+  if (isTauriRuntime()) {
+    const downloaded = await invoke<{
+      mime_type: string;
+      data_base64: string;
+    }>("download_remote_asset", { url });
+    const mimeType = downloaded.mime_type || "image/*";
+    return {
+      id,
+      originalName,
+      fileName: originalName,
+      mimeType,
+      dataUrl: `data:${mimeType};base64,${downloaded.data_base64}`,
       createdAt,
     };
   }
@@ -302,6 +346,62 @@ export async function importGeneratedAsset(
     dataUrl: generated.dataUrl,
     createdAt,
   };
+}
+
+async function materializeEmbeddedAssets(
+  projectDir: string,
+  project: MuseProject,
+): Promise<MuseProject> {
+  const assets = { ...project.assets };
+  let changed = false;
+
+  for (const [assetId, asset] of Object.entries(project.assets)) {
+    if (!asset.dataUrl?.startsWith("data:")) continue;
+    if (asset.relativePath || asset.absolutePath) continue;
+
+    const imported = await invoke<{
+      file_name: string;
+      relative_path: string;
+      absolute_path: string;
+      mime_type: string;
+    }>("import_asset", {
+      projectDir,
+      fileName: asset.fileName || asset.originalName,
+      dataBase64: asset.dataUrl.split(",")[1] ?? "",
+    });
+
+    assets[assetId] = {
+      ...asset,
+      fileName: imported.file_name,
+      mimeType: asset.mimeType || imported.mime_type,
+      relativePath: imported.relative_path,
+      absolutePath: imported.absolute_path,
+    };
+    changed = true;
+  }
+
+  return changed ? { ...project, assets } : project;
+}
+
+function assetDisplayCacheKey(projectDir: string, asset: Asset): string {
+  return `${projectDir}\n${asset.relativePath ?? asset.absolutePath ?? asset.id}`;
+}
+
+function getCachedAssetSrc(key: string): string | null {
+  const value = assetSrcCache.get(key);
+  if (!value) return null;
+  assetSrcCache.delete(key);
+  assetSrcCache.set(key, value);
+  return value;
+}
+
+function setCachedAssetSrc(key: string, value: string): void {
+  assetSrcCache.set(key, value);
+  while (assetSrcCache.size > ASSET_SRC_CACHE_LIMIT) {
+    const oldest = assetSrcCache.keys().next().value;
+    if (!oldest) return;
+    assetSrcCache.delete(oldest);
+  }
 }
 
 function fileToDataUrl(file: File): Promise<string> {
