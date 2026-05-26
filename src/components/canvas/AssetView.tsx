@@ -43,7 +43,8 @@ export function AssetView({
     }
 
     setLoading(true);
-    loadAssetDisplaySrc(projectDir, asset)
+    const previewSize = Math.ceil(Math.max(item.width, item.height) * window.devicePixelRatio * 1.25);
+    loadAssetDisplaySrc(projectDir, asset, previewSize)
       .then((nextSrc) => {
         if (!canceled) {
           setSrc(nextSrc);
@@ -61,7 +62,7 @@ export function AssetView({
     return () => {
       canceled = true;
     };
-  }, [projectDir, shouldLoad, asset.id, assetSourceVersion]);
+  }, [projectDir, shouldLoad, asset.id, assetSourceVersion, item.width, item.height]);
 
   return (
     <div

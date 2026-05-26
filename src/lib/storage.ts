@@ -19,6 +19,7 @@ declare global {
 const LOCAL_PROJECT_KEY = "museboard.localProject.v1";
 const LOCAL_PREFERENCES_KEY = "museboard.preferences.v1";
 const ASSET_SRC_CACHE_LIMIT = 80;
+const DEFAULT_ASSET_PREVIEW_SIZE = 900;
 const assetSrcCache = new Map<string, string>();
 
 const defaultAiSettings: AiSettings = {
@@ -196,7 +197,6 @@ export async function importAssetFile(
       mimeType: file.type || "application/octet-stream",
       relativePath: imported.relative_path,
       absolutePath: imported.absolute_path,
-      dataUrl,
       createdAt,
     };
   }
@@ -219,20 +219,23 @@ export function assetDisplaySrc(asset: Asset): string {
 export async function loadAssetDisplaySrc(
   projectDir: string | null,
   asset: Asset,
+  maxDimension = DEFAULT_ASSET_PREVIEW_SIZE,
 ): Promise<string> {
   if (asset.dataUrl) return asset.dataUrl;
   if (!isTauriRuntime() || !projectDir || !asset.relativePath) return "";
 
-  const cacheKey = assetDisplayCacheKey(projectDir, asset);
+  const previewSize = normalizePreviewSize(maxDimension);
+  const cacheKey = assetDisplayCacheKey(projectDir, asset, previewSize);
   const cached = getCachedAssetSrc(cacheKey);
   if (cached) return cached;
 
   const data = await invoke<{
     mime_type: string;
     data_base64: string;
-  }>("read_project_asset", {
+  }>("read_project_asset_preview", {
     projectDir,
     relativePath: asset.relativePath,
+    maxDimension: previewSize,
   });
 
   const src = `data:${data.mime_type || asset.mimeType};base64,${data.data_base64}`;
@@ -333,7 +336,6 @@ export async function importGeneratedAsset(
       mimeType: generated.mimeType || imported.mime_type || "image/png",
       relativePath: imported.relative_path,
       absolutePath: imported.absolute_path,
-      dataUrl: generated.dataUrl,
       createdAt,
     };
   }
@@ -376,6 +378,7 @@ async function materializeEmbeddedAssets(
       mimeType: asset.mimeType || imported.mime_type,
       relativePath: imported.relative_path,
       absolutePath: imported.absolute_path,
+      dataUrl: undefined,
     };
     changed = true;
   }
@@ -383,8 +386,13 @@ async function materializeEmbeddedAssets(
   return changed ? { ...project, assets } : project;
 }
 
-function assetDisplayCacheKey(projectDir: string, asset: Asset): string {
-  return `${projectDir}\n${asset.relativePath ?? asset.absolutePath ?? asset.id}`;
+function assetDisplayCacheKey(projectDir: string, asset: Asset, previewSize: number): string {
+  return `${projectDir}\n${asset.relativePath ?? asset.absolutePath ?? asset.id}\n${previewSize}`;
+}
+
+function normalizePreviewSize(maxDimension: number): number {
+  const value = Number.isFinite(maxDimension) ? Math.ceil(maxDimension) : DEFAULT_ASSET_PREVIEW_SIZE;
+  return Math.min(2048, Math.max(96, value));
 }
 
 function getCachedAssetSrc(key: string): string | null {
