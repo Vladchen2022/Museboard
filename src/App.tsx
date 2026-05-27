@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Loader2, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { Canvas } from "./components/Canvas";
@@ -30,6 +30,13 @@ import { createProject } from "./lib/templates";
 import { replaceTreeFromAi, touchProject, updateNode } from "./lib/tree";
 import { t } from "./lib/i18n";
 
+const HISTORY_LIMIT = 50;
+
+interface ProjectHistoryEntry {
+  project: MuseProject;
+  selectedNodeId: string;
+}
+
 export default function App() {
   const [initialState] = useState(() => {
     const preferences = loadAppPreferences();
@@ -52,6 +59,12 @@ export default function App() {
   const [status, setStatus] = useState(() => t(initialState.preferences.language, "notSaved"));
   const [alwaysOnTop, setAlwaysOnTop] = useState(false);
   const [cleanCanvasMode, setCleanCanvasMode] = useState(false);
+  const projectRef = useRef(project);
+  const selectedNodeIdRef = useRef(selectedNodeId);
+  const historyRef = useRef<{ past: ProjectHistoryEntry[]; future: ProjectHistoryEntry[] }>({
+    past: [],
+    future: [],
+  });
   const busy = busyAction !== null;
 
   const selectedNode = useMemo(
@@ -59,10 +72,87 @@ export default function App() {
     [project, selectedNodeId],
   );
 
-  function commitProject(next: MuseProject) {
+  function selectNode(nodeId: string) {
+    selectedNodeIdRef.current = nodeId;
+    setSelectedNodeId(nodeId);
+  }
+
+  function resetProject(next: MuseProject, nextSelectedNodeId = next.rootId) {
+    projectRef.current = next;
+    selectedNodeIdRef.current = nextSelectedNodeId;
+    historyRef.current = { past: [], future: [] };
     setProject(next);
-    if (!next.nodes[selectedNodeId]) setSelectedNodeId(next.rootId);
+    setSelectedNodeId(nextSelectedNodeId);
+  }
+
+  function commitProject(next: MuseProject, nextSelectedNodeId?: string) {
+    const current = projectRef.current;
+    const currentSelectedNodeId = selectedNodeIdRef.current;
+    if (next !== current) {
+      historyRef.current = {
+        past: [
+          ...historyRef.current.past,
+          { project: current, selectedNodeId: currentSelectedNodeId },
+        ].slice(-HISTORY_LIMIT),
+        future: [],
+      };
+    }
+
+    const resolvedSelectedNodeId =
+      nextSelectedNodeId ?? (next.nodes[currentSelectedNodeId] ? currentSelectedNodeId : next.rootId);
+    projectRef.current = next;
+    selectedNodeIdRef.current = resolvedSelectedNodeId;
+    setProject(next);
+    setSelectedNodeId(resolvedSelectedNodeId);
     setStatus(t(language, "unsaved"));
+  }
+
+  function undoProjectChange() {
+    const history = historyRef.current;
+    const previous = history.past[history.past.length - 1];
+    if (!previous) return;
+
+    const current: ProjectHistoryEntry = {
+      project: projectRef.current,
+      selectedNodeId: selectedNodeIdRef.current,
+    };
+    const restoredSelectedNodeId = previous.project.nodes[previous.selectedNodeId]
+      ? previous.selectedNodeId
+      : previous.project.rootId;
+
+    historyRef.current = {
+      past: history.past.slice(0, -1),
+      future: [current, ...history.future].slice(0, HISTORY_LIMIT),
+    };
+    projectRef.current = previous.project;
+    selectedNodeIdRef.current = restoredSelectedNodeId;
+    setProject(previous.project);
+    setSelectedNodeId(restoredSelectedNodeId);
+    setStatus(t(language, "undone"));
+  }
+
+  function redoProjectChange() {
+    const history = historyRef.current;
+    const next = history.future[0];
+    if (!next) return;
+
+    const current: ProjectHistoryEntry = {
+      project: projectRef.current,
+      selectedNodeId: selectedNodeIdRef.current,
+    };
+    const restoredSelectedNodeId = next.project.nodes[next.selectedNodeId]
+      ? next.selectedNodeId
+      : next.project.rootId;
+
+    historyRef.current = {
+      past: [...history.past, current].slice(-HISTORY_LIMIT),
+      future: history.future.slice(1),
+    };
+    projectRef.current = next.project;
+    selectedNodeIdRef.current = restoredSelectedNodeId;
+    setProject(next.project);
+    setSelectedNodeId(restoredSelectedNodeId);
+    setStatus(t(language, "redone"));
   }
 
   useEffect(() => {
@@ -72,6 +162,40 @@ export default function App() {
       language,
     });
   }, [project.aiSettings, project.comfySettings, language]);
+
+  useEffect(() => {
+    projectRef.current = project;
+  }, [project]);
+
+  useEffect(() => {
+    selectedNodeIdRef.current = selectedNodeId;
+  }, [selectedNodeId]);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, [contenteditable='true']")) return;
+
+      const key = event.key.toLowerCase();
+      const hasCommandKey = event.metaKey || event.ctrlKey;
+      const isUndo = hasCommandKey && !event.altKey && key === "z" && !event.shiftKey;
+      const isRedo =
+        hasCommandKey &&
+        !event.altKey &&
+        ((key === "z" && event.shiftKey) || (key === "y" && !event.shiftKey));
+
+      if (isUndo) {
+        event.preventDefault();
+        undoProjectChange();
+      } else if (isRedo) {
+        event.preventDefault();
+        redoProjectChange();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [language]);
 
   async function handleNewProject(type: CreationType) {
     setBusyAction("new");
@@ -83,8 +207,7 @@ export default function App() {
         project.aiSettings,
         project.comfySettings,
       );
-      setProject(next);
-      setSelectedNodeId(next.rootId);
+      resetProject(next);
       setProjectDir(null);
       setStatus(t(language, "newUnsaved"));
     } finally {
@@ -106,8 +229,7 @@ export default function App() {
         project.aiSettings,
         project.comfySettings,
       );
-      setProject(nextWithPreferences);
-      setSelectedNodeId(nextWithPreferences.rootId);
+      resetProject(nextWithPreferences);
       setProjectDir(dir);
       setStatus(t(language, "opened"));
     } catch (error) {
@@ -130,6 +252,7 @@ export default function App() {
         setProjectDir(dir);
       }
       const savedProject = await saveProject(dir, project);
+      projectRef.current = savedProject;
       setProject(savedProject);
       setStatus(t(language, "saved"));
     } catch (error) {
@@ -147,8 +270,7 @@ export default function App() {
       const depth = 2;
       const result = await generateFullProject(project, depth as 1 | 2 | 3, language);
       const next = replaceTreeFromAi(project, result.root, result.prose);
-      setProject(next);
-      setSelectedNodeId(next.rootId);
+      commitProject(next, next.rootId);
       setStatus(t(language, "generatedMap"));
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
@@ -169,7 +291,7 @@ export default function App() {
           next = updateNode(next, target.id, { note: update.note });
         }
       }
-      setProject(next);
+      if (next !== project) commitProject(next);
       setStatus(updates.length ? t(language, "completedEmpty") : t(language, "noEmptyNodes"));
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
@@ -361,7 +483,7 @@ export default function App() {
                 project={project}
                 language={language}
                 selectedNodeId={selectedNodeId}
-                onSelect={setSelectedNodeId}
+                onSelect={selectNode}
                 onProjectChange={commitProject}
                 onGenerateChildren={setGenerateNodeId}
                 onGenerateDescription={handleGenerateNodeDescription}
@@ -396,7 +518,7 @@ export default function App() {
           nodeId={generateNodeId}
           onClose={() => setGenerateNodeId(null)}
           onProjectChange={commitProject}
-          onSelect={setSelectedNodeId}
+          onSelect={selectNode}
           onStatus={setStatus}
         />
       )}
@@ -409,7 +531,7 @@ export default function App() {
           importGeneratedAsset={importGeneratedAsset}
           onClose={() => setImagePanelOpen(false)}
           onProjectChange={commitProject}
-          onSelect={setSelectedNodeId}
+          onSelect={selectNode}
           onStatus={setStatus}
         />
       )}

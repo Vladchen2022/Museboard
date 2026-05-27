@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import type { BusyAction, CreationType, Language, MuseProject } from "../types";
-import { createDefaultComfyWorkflow, createFluxComfyWorkflow, testComfyConnection } from "../lib/comfy";
+import { ComfySetupWizard } from "./ComfySetupWizard";
 import { creationTypeOptions } from "../lib/templates";
 import { creationTypeLabel, t } from "../lib/i18n";
 
@@ -50,57 +50,6 @@ export function Toolbar({
   onLanguageChange,
 }: ToolbarProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [comfyStatus, setComfyStatus] = useState("");
-
-  function updateComfySettings(patch: Partial<MuseProject["comfySettings"]>) {
-    onProjectChange({
-      ...project,
-      comfySettings: {
-        ...project.comfySettings,
-        ...patch,
-      },
-    });
-  }
-
-  async function handleComfyConnectionTest() {
-    setComfyStatus(t(language, "testingConnection"));
-    try {
-      await testComfyConnection(project.comfySettings);
-      setComfyStatus(t(language, "comfyConnected"));
-    } catch (error) {
-      setComfyStatus(error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  async function handleAutoConfigureComfy() {
-    setComfyStatus(t(language, "autoConfiguringWorkflow"));
-    try {
-      const preset = await createDefaultComfyWorkflow(project.comfySettings);
-      updateComfySettings(preset);
-      setComfyStatus(
-        preset.checkpointName
-          ? `${t(language, "autoConfiguredWorkflow")} ${preset.checkpointName}`
-          : t(language, "autoConfiguredWorkflow"),
-      );
-    } catch (error) {
-      setComfyStatus(error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  async function handleFluxConfigureComfy() {
-    setComfyStatus(t(language, "autoConfiguringFluxWorkflow"));
-    try {
-      const preset = await createFluxComfyWorkflow(project.comfySettings);
-      updateComfySettings(preset);
-      setComfyStatus(
-        preset.checkpointName
-          ? `${t(language, "autoConfiguredFluxWorkflow")} ${preset.checkpointName}`
-          : t(language, "autoConfiguredFluxWorkflow"),
-      );
-    } catch (error) {
-      setComfyStatus(error instanceof Error ? error.message : String(error));
-    }
-  }
 
   return (
     <>
@@ -262,178 +211,11 @@ export function Toolbar({
                 />
               </label>
 
-              <div className="settingsSectionTitle">{t(language, "comfySettings")}</div>
-              <div className="settingsInline">
-                <label className="field">
-                  <span>{t(language, "comfyEndpoint")}</span>
-                  <input
-                    value={project.comfySettings.endpoint}
-                    onChange={(event) => updateComfySettings({ endpoint: event.target.value })}
-                  />
-                </label>
-                <button className="iconTextButton" type="button" onClick={handleComfyConnectionTest}>
-                  {t(language, "testConnection")}
-                </button>
-              </div>
-              <label className="checkboxField">
-                <input
-                  type="checkbox"
-                  checked={project.comfySettings.autoStart}
-                  onChange={(event) => updateComfySettings({ autoStart: event.target.checked })}
-                />
-                <span>{t(language, "autoStartComfy")}</span>
-              </label>
-              <div className="settingsInline">
-                <label className="field">
-                  <span>{t(language, "comfyLaunchDir")}</span>
-                  <input
-                    value={project.comfySettings.launchWorkingDir}
-                    onChange={(event) => updateComfySettings({ launchWorkingDir: event.target.value })}
-                  />
-                </label>
-                <label className="field">
-                  <span>{t(language, "comfyLaunchCommand")}</span>
-                  <input
-                    value={project.comfySettings.launchCommand}
-                    onChange={(event) => updateComfySettings({ launchCommand: event.target.value })}
-                  />
-                </label>
-              </div>
-              <div className="settingsHint">{t(language, "comfyLaunchCommandHint")}</div>
-              {comfyStatus && <div className="settingsHint">{comfyStatus}</div>}
-
-              <div className="settingsInline">
-                <button
-                  className="iconTextButton"
-                  type="button"
-                  onClick={() => document.getElementById("comfyWorkflowFile")?.click()}
-                >
-                  <FileDown size={16} />
-                  {t(language, "importWorkflow")}
-                </button>
-                <button className="iconTextButton" type="button" onClick={handleAutoConfigureComfy}>
-                  <Sparkles size={16} />
-                  {t(language, "autoConfigureWorkflow")}
-                </button>
-                <button className="iconTextButton" type="button" onClick={handleFluxConfigureComfy}>
-                  <Sparkles size={16} />
-                  {t(language, "autoConfigureFluxWorkflow")}
-                </button>
-                <span className="settingsHint">
-                  {project.comfySettings.workflowJson
-                    ? t(language, "workflowLoaded")
-                    : t(language, "workflowMissing")}
-                </span>
-                <input
-                  id="comfyWorkflowFile"
-                  type="file"
-                  accept="application/json,.json"
-                  hidden
-                  onChange={(event) => {
-                    const file = event.currentTarget.files?.[0];
-                    if (!file) return;
-                    const reader = new FileReader();
-                    reader.onload = () => {
-                      updateComfySettings({ workflowJson: String(reader.result ?? "") });
-                      setComfyStatus(t(language, "workflowLoaded"));
-                    };
-                    reader.onerror = () => setComfyStatus(t(language, "workflowReadFailed"));
-                    reader.readAsText(file);
-                    event.currentTarget.value = "";
-                  }}
-                />
-              </div>
-
-              <label className="field">
-                <span>{t(language, "workflowJson")}</span>
-                <textarea
-                  className="workflowTextarea"
-                  value={project.comfySettings.workflowJson}
-                  placeholder={t(language, "workflowPlaceholder")}
-                  onChange={(event) => updateComfySettings({ workflowJson: event.target.value })}
-                />
-              </label>
-
-              <div className="nodeMappingGrid">
-                <label className="field">
-                  <span>{t(language, "positivePromptNode")}</span>
-                  <input
-                    value={project.comfySettings.positivePromptNodeId}
-                    onChange={(event) =>
-                      updateComfySettings({ positivePromptNodeId: event.target.value })
-                    }
-                  />
-                </label>
-                <label className="field">
-                  <span>{t(language, "inputField")}</span>
-                  <input
-                    value={project.comfySettings.positivePromptInput}
-                    onChange={(event) =>
-                      updateComfySettings({ positivePromptInput: event.target.value })
-                    }
-                  />
-                </label>
-                <label className="field">
-                  <span>{t(language, "negativePromptNode")}</span>
-                  <input
-                    value={project.comfySettings.negativePromptNodeId}
-                    onChange={(event) =>
-                      updateComfySettings({ negativePromptNodeId: event.target.value })
-                    }
-                  />
-                </label>
-                <label className="field">
-                  <span>{t(language, "inputField")}</span>
-                  <input
-                    value={project.comfySettings.negativePromptInput}
-                    onChange={(event) =>
-                      updateComfySettings({ negativePromptInput: event.target.value })
-                    }
-                  />
-                </label>
-                <label className="field">
-                  <span>{t(language, "widthNode")}</span>
-                  <input
-                    value={project.comfySettings.widthNodeId}
-                    onChange={(event) => updateComfySettings({ widthNodeId: event.target.value })}
-                  />
-                </label>
-                <label className="field">
-                  <span>{t(language, "inputField")}</span>
-                  <input
-                    value={project.comfySettings.widthInput}
-                    onChange={(event) => updateComfySettings({ widthInput: event.target.value })}
-                  />
-                </label>
-                <label className="field">
-                  <span>{t(language, "heightNode")}</span>
-                  <input
-                    value={project.comfySettings.heightNodeId}
-                    onChange={(event) => updateComfySettings({ heightNodeId: event.target.value })}
-                  />
-                </label>
-                <label className="field">
-                  <span>{t(language, "inputField")}</span>
-                  <input
-                    value={project.comfySettings.heightInput}
-                    onChange={(event) => updateComfySettings({ heightInput: event.target.value })}
-                  />
-                </label>
-                <label className="field">
-                  <span>{t(language, "seedNode")}</span>
-                  <input
-                    value={project.comfySettings.seedNodeId}
-                    onChange={(event) => updateComfySettings({ seedNodeId: event.target.value })}
-                  />
-                </label>
-                <label className="field">
-                  <span>{t(language, "inputField")}</span>
-                  <input
-                    value={project.comfySettings.seedInput}
-                    onChange={(event) => updateComfySettings({ seedInput: event.target.value })}
-                  />
-                </label>
-              </div>
+              <ComfySetupWizard
+                project={project}
+                language={language}
+                onProjectChange={onProjectChange}
+              />
             </div>
 
             <div className="modalActions">

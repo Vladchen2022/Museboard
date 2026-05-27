@@ -95,6 +95,10 @@ export function AssetView({
           src={src}
           alt={asset.originalName}
           draggable={false}
+          style={{
+            filter: item.grayscale ? "grayscale(1)" : undefined,
+            transform: item.flippedX ? "scaleX(-1)" : undefined,
+          }}
           onError={() => setFailed(true)}
           onLoad={() => setFailed(false)}
         />

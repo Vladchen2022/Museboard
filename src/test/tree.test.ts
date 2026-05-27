@@ -6,6 +6,7 @@ import {
   appendCandidateNodes,
   getDescendantIds,
   getVisibleAssetIds,
+  removeVisibleAssets,
 } from "../lib/tree";
 import type { MuseProject } from "../types";
 
@@ -76,6 +77,62 @@ describe("tree operations", () => {
 
     expect(getVisibleAssetIds(withAsset, heroId)).toEqual(["asset_1"]);
     expect(getVisibleAssetIds(withAsset, peopleId)).toEqual(["asset_1"]);
+  });
+
+  it("removes visible child asset links from a parent aggregate view", () => {
+    const project = createProject("story");
+    const peopleId = project.nodes[project.rootId].children.find(
+      (id) => project.nodes[id].title === "人物",
+    )!;
+    const heroId = project.nodes[peopleId].children[0];
+    const withAsset: MuseProject = {
+      ...project,
+      assets: {
+        asset_1: {
+          id: "asset_1",
+          originalName: "hero.jpg",
+          fileName: "hero.jpg",
+          mimeType: "image/jpeg",
+          dataUrl: "data:image/jpeg;base64,",
+          createdAt: new Date().toISOString(),
+        },
+      },
+      assetLinks: [
+        {
+          id: "link_1",
+          assetId: "asset_1",
+          nodeId: heroId,
+          createdAt: new Date().toISOString(),
+        },
+      ],
+      layouts: {
+        [peopleId]: {
+          nodeId: peopleId,
+          annotations: [],
+          items: {
+            asset_1: {
+              assetId: "asset_1",
+              x: 100,
+              y: 100,
+              width: 220,
+              height: 160,
+              rotation: 0,
+              z: 1,
+            },
+          },
+        },
+      },
+    };
+
+    const result = removeVisibleAssets(withAsset, peopleId, ["asset_1"]);
+
+    expect(result.removedLinks).toBe(1);
+    expect(result.removedAssets).toBe(1);
+    expect(result.project.assetLinks).toHaveLength(0);
+    expect(result.project.assets.asset_1).toBeUndefined();
+    expect(result.project.layouts[peopleId].items.asset_1).toBeUndefined();
+    expect(getVisibleAssetIds(result.project, peopleId)).toEqual([]);
+    expect(getVisibleAssetIds(result.project, heroId)).toEqual([]);
   });
 
   it("creates specialized scene templates and the revised character template", () => {

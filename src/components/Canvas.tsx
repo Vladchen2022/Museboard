@@ -1,6 +1,8 @@
 import {
   ArrowUpRight,
+  Contrast,
   Eye,
+  FlipHorizontal2,
   ImagePlus,
   MousePointer2,
   PanelTopClose,
@@ -39,7 +41,7 @@ import {
 import { AnnotationView } from "./canvas/AnnotationView";
 import { AssetView } from "./canvas/AssetView";
 import { t } from "../lib/i18n";
-import { ensureLayout, getVisibleAssetIds, touchProject } from "../lib/tree";
+import { ensureLayout, getVisibleAssetIds, removeVisibleAssets, touchProject } from "../lib/tree";
 
 const IMAGE_LOAD_MARGIN = 520;
 
@@ -152,6 +154,19 @@ export function Canvas({
     () => getVisibleAssetIds(project, selectedNodeId),
     [project, selectedNodeId],
   );
+  const grayscaleTargetIds = selectedAssetIds.length ? selectedAssetIds : visibleAssetIds;
+  const mirrorButtonActive =
+    selectedAssetIds.length > 0 &&
+    selectedAssetIds.every((assetId) => {
+      const item = defaultLayoutItemFrom(layout, assetId, visibleAssetIds.indexOf(assetId));
+      return item.flippedX;
+    });
+  const grayscaleButtonActive =
+    visibleAssetIds.length > 0 &&
+    grayscaleTargetIds.every((assetId) => {
+      const item = defaultLayoutItemFrom(layout, assetId, visibleAssetIds.indexOf(assetId));
+      return item.grayscale;
+    });
 
   useEffect(() => {
     const viewport = canvasRef.current;
@@ -194,6 +209,10 @@ export function Canvas({
     draftLayoutRef.current = null;
     setDraftLayout(null);
   }, [selectedNodeId]);
+
+  useEffect(() => {
+    setSelectedAssetIds((current) => current.filter((assetId) => visibleAssetIds.includes(assetId)));
+  }, [visibleAssetIds]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -383,13 +402,75 @@ export function Canvas({
     };
   }
 
-  function removeOrHideAsset(assetId: string) {
-    removeOrHideAssets([assetId]);
+  function defaultLayoutItemFrom(
+    sourceLayout: CanvasLayout,
+    assetId: string,
+    index: number,
+  ): LayoutItem {
+    return (
+      sourceLayout.items[assetId] ?? {
+        assetId,
+        x: 80 + (index % 4) * 260,
+        y: 90 + Math.floor(index / 4) * 230,
+        width: 220,
+        height: 160,
+        rotation: 0,
+        z: index + 1,
+      }
+    );
+  }
+
+  function toggleMirrorSelected() {
+    if (!selectedAssetIds.length) {
+      onStatus(t(language, "selectImageFirst"));
+      return;
+    }
+
+    updateLayout((current) => ({
+      ...current,
+      items: {
+        ...current.items,
+        ...Object.fromEntries(
+          selectedAssetIds.map((assetId) => {
+            const item = defaultLayoutItemFrom(current, assetId, visibleAssetIds.indexOf(assetId));
+            return [assetId, { ...item, flippedX: !item.flippedX }];
+          }),
+        ),
+      },
+    }));
+    onStatus(t(language, "mirroredImages"));
+  }
+
+  function toggleGrayscale() {
+    const targetAssetIds = grayscaleTargetIds;
+    if (!targetAssetIds.length) {
+      onStatus(t(language, "selectImageFirst"));
+      return;
+    }
+
+    const shouldRestoreColor = targetAssetIds.every(
+      (assetId) => defaultLayoutItemFrom(layout, assetId, visibleAssetIds.indexOf(assetId)).grayscale,
+    );
+    const nextGrayscale = !shouldRestoreColor;
+
+    updateLayout((current) => ({
+      ...current,
+      items: {
+        ...current.items,
+        ...Object.fromEntries(
+          targetAssetIds.map((assetId) => {
+            const item = defaultLayoutItemFrom(current, assetId, visibleAssetIds.indexOf(assetId));
+            return [assetId, { ...item, grayscale: nextGrayscale }];
+          }),
+        ),
+      },
+    }));
+    onStatus(t(language, nextGrayscale ? "grayscaleImages" : "colorImages"));
   }
 
   function removeSelected() {
     if (selectedAssetIds.length) {
-      removeOrHideAssets(selectedAssetIds, selectedAnnotationIds);
+      removeAssets(selectedAssetIds, selectedAnnotationIds);
       return;
     }
 
@@ -404,51 +485,14 @@ export function Canvas({
     }
   }
 
-  function removeOrHideAssets(assetIds: string[], annotationIdsToRemove: string[] = []) {
+  function removeAssets(assetIds: string[], annotationIdsToRemove: string[] = []) {
     if (!assetIds.length) return;
 
-    let next = project;
-    let removed = 0;
-    let hidden = 0;
-
-    for (const assetId of assetIds) {
-      const directLink = next.assetLinks.find(
-        (link) => link.assetId === assetId && link.nodeId === selectedNodeId,
-      );
-
-      if (directLink) {
-        const remainingLinks = next.assetLinks.filter((link) => link.id !== directLink.id);
-        const stillUsed = remainingLinks.some((link) => link.assetId === assetId);
-        const assets = { ...next.assets };
-        if (!stillUsed) delete assets[assetId];
-        next = touchProject({
-          ...next,
-          assets,
-          assetLinks: remainingLinks,
-        });
-        removed += 1;
-      } else {
-        const currentLayout = ensureLayout(next, selectedNodeId);
-        next = touchProject({
-          ...next,
-          layouts: {
-            ...next.layouts,
-            [selectedNodeId]: {
-              ...currentLayout,
-              items: {
-                ...currentLayout.items,
-                [assetId]: {
-                  ...currentLayout.items[assetId],
-                  ...defaultLayoutItem(assetId, visibleAssetIds.indexOf(assetId)),
-                  hidden: true,
-                },
-              },
-            },
-          },
-        });
-        hidden += 1;
-      }
-    }
+    let { project: next, removedLinks, removedAssets } = removeVisibleAssets(
+      project,
+      selectedNodeId,
+      assetIds,
+    );
 
     if (annotationIdsToRemove.length) {
       const currentLayout = ensureLayout(next, selectedNodeId);
@@ -467,13 +511,7 @@ export function Canvas({
     }
 
     onProjectChange(next);
-    if (removed && hidden) {
-      onStatus(`${t(language, "removedImages")} (${removed}) ${t(language, "hiddenImages")} (${hidden})`);
-    } else if (removed) {
-      onStatus(`${t(language, "removedImages")} (${removed})`);
-    } else {
-      onStatus(`${t(language, "hiddenImages")} (${hidden})`);
-    }
+    onStatus(`${t(language, "removedImages")} (${removedAssets || removedLinks})`);
     setSelectedAssetIds([]);
     setSelectedAnnotationIds([]);
   }
@@ -604,6 +642,25 @@ export function Canvas({
               {option.icon}
             </button>
           ))}
+        </div>
+        <div className="segmented">
+          <button
+            type="button"
+            title={t(language, "mirrorImage")}
+            onClick={toggleMirrorSelected}
+            disabled={!selectedAssetId}
+            className={mirrorButtonActive ? "active" : ""}
+          >
+            <FlipHorizontal2 size={16} />
+          </button>
+          <button
+            type="button"
+            title={t(language, "toggleGrayscale")}
+            onClick={toggleGrayscale}
+            className={grayscaleButtonActive ? "active" : ""}
+          >
+            <Contrast size={16} />
+          </button>
         </div>
         <button className="iconTextButton" type="button" onClick={() => document.getElementById("imageImport")?.click()}>
           <ImagePlus size={16} />

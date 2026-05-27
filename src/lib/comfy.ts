@@ -16,6 +16,12 @@ export interface AspectRatioOption {
   height: number;
 }
 
+export interface ComfyWorkflowInspection {
+  patch: Partial<ComfySettings>;
+  summary: string;
+  warnings: string[];
+}
+
 export const aspectRatioOptions: AspectRatioOption[] = [
   { id: "1:1", label: "1:1 1024x1024", width: 1024, height: 1024 },
   { id: "4:3", label: "4:3 1152x896", width: 1152, height: 896 },
@@ -486,6 +492,151 @@ export function validateComfySettings(
   return null;
 }
 
+export function inferComfyWorkflowSettings(
+  workflowJson: string,
+  language: Language = "zh",
+): ComfyWorkflowInspection {
+  const messages =
+    language === "en"
+      ? {
+          invalid: "Workflow JSON is invalid.",
+          noApi: "This does not look like ComfyUI API workflow JSON.",
+          noPositive: "Positive prompt node was not detected.",
+          noSize: "Width or height nodes were not detected.",
+          noSave: "SaveImage node was not detected.",
+          summary: (items: string[]) => `Detected: ${items.join(", ")}.`,
+        }
+      : {
+          invalid: "Workflow JSON 不合法。",
+          noApi: "这看起来不是 ComfyUI API workflow JSON。",
+          noPositive: "没有识别到正向提示词节点。",
+          noSize: "没有识别到宽度或高度节点。",
+          noSave: "没有识别到 SaveImage 节点。",
+          summary: (items: string[]) => `已识别：${items.join("、")}。`,
+        };
+
+  let workflow: Record<string, ComfyWorkflowNode>;
+  try {
+    workflow = JSON.parse(workflowJson) as Record<string, ComfyWorkflowNode>;
+  } catch {
+    throw new Error(messages.invalid);
+  }
+
+  if (!isApiWorkflow(workflow)) {
+    throw new Error(messages.noApi);
+  }
+
+  const entries = Object.entries(workflow);
+  const textNodes = entries.filter(([, node]) => hasInput(node, "text"));
+  const negativeNode = textNodes.find(([, node]) => looksLikeNegativePrompt(node.inputs?.text));
+  const positiveNode =
+    textNodes.find(([, node]) => node !== negativeNode?.[1] && isPromptEncoder(node.class_type)) ??
+    textNodes.find(([, node]) => node !== negativeNode?.[1]);
+  const widthIds = entries
+    .filter(([, node]) => hasInput(node, "width"))
+    .sort((a, b) => widthHeightNodeScore(b[1]) - widthHeightNodeScore(a[1]))
+    .map(([id]) => id);
+  const heightIds = entries
+    .filter(([, node]) => hasInput(node, "height"))
+    .sort((a, b) => widthHeightNodeScore(b[1]) - widthHeightNodeScore(a[1]))
+    .map(([id]) => id);
+  const seedEntry = entries.find(([, node]) => hasInput(node, "noise_seed")) ??
+    entries.find(([, node]) => hasInput(node, "seed"));
+  const seedInput = seedEntry?.[1].inputs?.noise_seed !== undefined ? "noise_seed" : "seed";
+  const saveNode = entries.find(([, node]) => node.class_type === "SaveImage");
+
+  const patch: Partial<ComfySettings> = {
+    workflowJson,
+    positivePromptNodeId: positiveNode?.[0] ?? "",
+    positivePromptInput: positiveNode ? "text" : "",
+    negativePromptNodeId: negativeNode?.[0] ?? "",
+    negativePromptInput: negativeNode ? "text" : "",
+    widthNodeId: widthIds.join(","),
+    widthInput: widthIds.length ? "width" : "",
+    heightNodeId: heightIds.join(","),
+    heightInput: heightIds.length ? "height" : "",
+    seedNodeId: seedEntry?.[0] ?? "",
+    seedInput: seedEntry ? seedInput : "",
+  };
+
+  const warnings = [
+    !positiveNode ? messages.noPositive : "",
+    (!widthIds.length || !heightIds.length) ? messages.noSize : "",
+    !saveNode ? messages.noSave : "",
+  ].filter(Boolean);
+  const detected = [
+    positiveNode ? `positive ${positiveNode[0]}.text` : "",
+    negativeNode ? `negative ${negativeNode[0]}.text` : "",
+    widthIds.length ? `width ${widthIds.join(",")}.width` : "",
+    heightIds.length ? `height ${heightIds.join(",")}.height` : "",
+    seedEntry ? `seed ${seedEntry[0]}.${seedInput}` : "",
+    saveNode ? `SaveImage ${saveNode[0]}` : "",
+  ].filter(Boolean);
+
+  return {
+    patch,
+    summary: messages.summary(detected.length ? detected : ["workflow"]),
+    warnings,
+  };
+}
+
+export function diagnoseComfyError(error: unknown, language: Language = "zh"): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const lower = message.toLowerCase();
+
+  if (lower.includes("workflow json") || lower.includes("api workflow")) {
+    return language === "en"
+      ? `${message} Import an API workflow or use the Flux preset.`
+      : `${message} 请导入 API workflow，或直接使用 Flux 推荐预设。`;
+  }
+  if (lower.includes("object_info") || lower.includes("not found") || lower.includes("找不到")) {
+    return language === "en"
+      ? `${message} Check whether the required ComfyUI custom nodes and Flux models are installed.`
+      : `${message} 请检查 ComfyUI 是否安装了所需自定义节点和 Flux 模型。`;
+  }
+  if (lower.includes("failed to fetch") || lower.includes("connection") || lower.includes("连接")) {
+    return language === "en"
+      ? `${message} Check the endpoint, start ComfyUI, or enable auto start in this panel.`
+      : `${message} 请检查地址、启动 ComfyUI，或在此面板启用自动启动。`;
+  }
+  if (lower.includes("out of memory") || lower.includes("cuda") || lower.includes("mps")) {
+    return language === "en"
+      ? `${message} Try a smaller aspect ratio or fewer steps in the ComfyUI workflow.`
+      : `${message} 请尝试更小尺寸，或在 ComfyUI workflow 里降低步数。`;
+  }
+
+  return message;
+}
+
+export function buildComfyDiagnosticReport(
+  settings: ComfySettings,
+  language: Language = "zh",
+): string {
+  const workflowInfo = inspectWorkflowForReport(settings.workflowJson);
+  const validation = validateComfySettings(settings, language);
+  const lines = [
+    "Museboard ComfyUI Diagnostic Report",
+    `Time: ${new Date().toISOString()}`,
+    `Runtime: ${isTauriRuntime() ? "desktop" : "browser-preview"}`,
+    `Endpoint: ${settings.endpoint || "(empty)"}`,
+    `Auto start: ${settings.autoStart ? "enabled" : "disabled"}`,
+    `Launch dir: ${settings.launchWorkingDir ? redactLocalPath(settings.launchWorkingDir) : "(empty)"}`,
+    `Launch command: ${settings.launchCommand || "(empty)"}`,
+    `Workflow present: ${settings.workflowJson.trim() ? "yes" : "no"}`,
+    `Workflow parse: ${workflowInfo.parse}`,
+    `Workflow nodes: ${workflowInfo.nodeCount}`,
+    `Workflow classes: ${workflowInfo.classes.join(", ") || "(none)"}`,
+    `Positive prompt: ${settings.positivePromptNodeId || "(empty)"}.${settings.positivePromptInput || "(empty)"}`,
+    `Negative prompt: ${settings.negativePromptNodeId || "(empty)"}.${settings.negativePromptInput || "(empty)"}`,
+    `Width: ${settings.widthNodeId || "(empty)"}.${settings.widthInput || "(empty)"}`,
+    `Height: ${settings.heightNodeId || "(empty)"}.${settings.heightInput || "(empty)"}`,
+    `Seed: ${settings.seedNodeId || "(empty)"}.${settings.seedInput || "(empty)"}`,
+    `Validation: ${validation || "ok"}`,
+  ];
+
+  return lines.join("\n");
+}
+
 export function buildFallbackImagePrompt(project: MuseProject, _language: Language): string {
   const source = (project.prose.trim() || treeToText(project)).replace(/\s+/g, " ").trim();
   if (!source) {
@@ -500,6 +651,76 @@ export function buildFallbackImagePrompt(project: MuseProject, _language: Langua
     source,
     buildRealisticStyleSuffix(project.creationType),
   ].join(", ");
+}
+
+interface ComfyWorkflowNode {
+  class_type?: string;
+  inputs?: Record<string, unknown>;
+}
+
+function isApiWorkflow(workflow: Record<string, ComfyWorkflowNode>): boolean {
+  const nodes = Object.values(workflow);
+  return nodes.length > 0 && nodes.some((node) => node?.class_type && node.inputs);
+}
+
+function hasInput(node: ComfyWorkflowNode, inputName: string): boolean {
+  return Boolean(node.inputs && Object.prototype.hasOwnProperty.call(node.inputs, inputName));
+}
+
+function isPromptEncoder(classType: string | undefined): boolean {
+  return Boolean(classType?.toLowerCase().includes("textencode"));
+}
+
+function looksLikeNegativePrompt(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  return /low quality|bad anatomy|watermark|blurry|distorted|worst quality|extra limbs/i.test(value);
+}
+
+function widthHeightNodeScore(node: ComfyWorkflowNode): number {
+  const classType = node.class_type?.toLowerCase() ?? "";
+  if (classType.includes("latent")) return 4;
+  if (classType.includes("scheduler")) return 3;
+  if (classType.includes("empty")) return 2;
+  return 1;
+}
+
+function inspectWorkflowForReport(workflowJson: string): {
+  parse: string;
+  nodeCount: number;
+  classes: string[];
+} {
+  if (!workflowJson.trim()) {
+    return { parse: "empty", nodeCount: 0, classes: [] };
+  }
+
+  try {
+    const workflow = JSON.parse(workflowJson) as Record<string, ComfyWorkflowNode>;
+    const classes = Array.from(
+      new Set(
+        Object.values(workflow)
+          .map((node) => node.class_type)
+          .filter((value): value is string => Boolean(value)),
+      ),
+    ).slice(0, 36);
+    return {
+      parse: isApiWorkflow(workflow) ? "api-workflow" : "not-api-workflow",
+      nodeCount: Object.keys(workflow).length,
+      classes,
+    };
+  } catch (error) {
+    return {
+      parse: `invalid-json: ${error instanceof Error ? error.message : String(error)}`,
+      nodeCount: 0,
+      classes: [],
+    };
+  }
+}
+
+function redactLocalPath(value: string): string {
+  return value
+    .replace(/\/Users\/[^/]+/g, "/Users/<user>")
+    .replace(/\\\\Users\\\\[^\\]+/g, "\\\\Users\\\\<user>")
+    .replace(/C:\\Users\\[^\\]+/g, "C:/Users/<user>");
 }
 
 export function buildRealisticStyleSuffix(type: MuseProject["creationType"]): string {

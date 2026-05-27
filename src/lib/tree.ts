@@ -217,6 +217,59 @@ export function deleteNode(project: MuseProject, nodeId: string): MuseProject {
   return touchProject({ ...project, nodes, layouts, assetLinks, assets });
 }
 
+export function removeVisibleAssets(
+  project: MuseProject,
+  nodeId: string,
+  assetIds: string[],
+): { project: MuseProject; removedLinks: number; removedAssets: number } {
+  const assetIdSet = new Set(assetIds);
+  if (assetIdSet.size === 0) {
+    return { project, removedLinks: 0, removedAssets: 0 };
+  }
+
+  const visibleNodeIds = new Set(getDescendantIds(project, nodeId, true));
+  const remainingLinks = project.assetLinks.filter(
+    (link) => !(assetIdSet.has(link.assetId) && visibleNodeIds.has(link.nodeId)),
+  );
+  const removedLinks = project.assetLinks.length - remainingLinks.length;
+  if (removedLinks === 0) {
+    return { project, removedLinks: 0, removedAssets: 0 };
+  }
+
+  const linkedAssetIds = new Set(remainingLinks.map((link) => link.assetId));
+  const assets = { ...project.assets };
+  let removedAssets = 0;
+  for (const assetId of assetIdSet) {
+    if (!linkedAssetIds.has(assetId)) {
+      delete assets[assetId];
+      removedAssets += 1;
+    }
+  }
+
+  const layouts = Object.fromEntries(
+    Object.entries(project.layouts).map(([layoutNodeId, layout]) => [
+      layoutNodeId,
+      {
+        ...layout,
+        items: Object.fromEntries(
+          Object.entries(layout.items).filter(([assetId]) => !assetIdSet.has(assetId)),
+        ),
+      },
+    ]),
+  );
+
+  return {
+    project: touchProject({
+      ...project,
+      assets,
+      assetLinks: remainingLinks,
+      layouts,
+    }),
+    removedLinks,
+    removedAssets,
+  };
+}
+
 export function treeToText(project: MuseProject): string {
   const lines: string[] = [];
 

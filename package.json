@@ -8,6 +8,8 @@
     "build": "tsc && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test": "vitest run",
+    "check": "npm test -- --run && npm run build && cargo test --manifest-path src-tauri/Cargo.toml",
+    "release:local": "npm run check && npm run tauri -- build",
     "tauri": "tauri"
   },
   "dependencies": {

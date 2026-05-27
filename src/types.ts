@@ -58,6 +58,8 @@ export interface LayoutItem {
   rotation: number;
   z: number;
   hidden?: boolean;
+  flippedX?: boolean;
+  grayscale?: boolean;
 }
 
 export interface Annotation {

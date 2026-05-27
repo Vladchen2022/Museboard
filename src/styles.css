@@ -532,6 +532,12 @@ button:disabled {
   color: #201d10;
 }
 
+.segmented button:disabled {
+  color: #6d6860;
+  cursor: default;
+  opacity: 0.45;
+}
+
 .canvasViewport {
   position: relative;
   overflow: auto;
@@ -590,6 +596,7 @@ button:disabled {
   height: 100%;
   object-fit: contain;
   pointer-events: none;
+  transform-origin: center;
 }
 
 .assetError {
@@ -888,6 +895,171 @@ button:disabled {
   gap: 10px;
 }
 
+.comfyWizard {
+  display: grid;
+  gap: 14px;
+  padding-top: 8px;
+  border-top: 1px solid #3d3a34;
+}
+
+.comfyWizardHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: start;
+}
+
+.comfyWizardHeader p,
+.comfyStep p {
+  margin: 6px 0 0;
+  color: #aaa299;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.comfyReadiness {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.readinessItem {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid #4c4740;
+  border-radius: 7px;
+  color: #aaa299;
+  background: #1d1c1a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.readinessItem.ready {
+  border-color: #4d6f59;
+  color: #c7f2d4;
+  background: rgba(56, 128, 84, 0.16);
+}
+
+.comfyWizardSteps {
+  display: grid;
+  gap: 10px;
+}
+
+.comfyStep {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #3d3a34;
+  border-radius: 8px;
+  background: #1d1c1a;
+}
+
+.comfyStepHeader {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  color: #f1ecdf;
+  font-size: 13px;
+}
+
+.comfyStepHeader span {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 999px;
+  color: #1d1c1a;
+  background: #f1ecdf;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.comfyPresetGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.comfyPresetButton {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 8px;
+  align-items: start;
+  min-height: 86px;
+  padding: 12px;
+  border: 1px solid #4c4740;
+  border-radius: 8px;
+  color: #f1ecdf;
+  background: #242321;
+  text-align: left;
+  cursor: pointer;
+}
+
+.comfyPresetButton:hover {
+  border-color: #7f7769;
+  background: #2c2a27;
+}
+
+.comfyPresetButton small {
+  grid-column: 2;
+  color: #aaa299;
+  line-height: 1.35;
+}
+
+.settingsStatus {
+  padding: 10px 12px;
+  border: 1px solid #4c4740;
+  border-radius: 8px;
+  color: #e8e1d6;
+  background: #1d1c1a;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.advancedComfySettings {
+  display: grid;
+  gap: 12px;
+}
+
+.advancedComfySettings summary {
+  cursor: pointer;
+  color: #f1ecdf;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.advancedComfySettings[open] {
+  padding: 12px;
+  border: 1px solid #3d3a34;
+  border-radius: 8px;
+  background: #1d1c1a;
+}
+
+.advancedComfySettings[open] summary {
+  margin-bottom: 12px;
+}
+
+.comfyTestPreview {
+  overflow: hidden;
+  width: 168px;
+  aspect-ratio: 1;
+  border: 1px solid #4c4740;
+  border-radius: 8px;
+  background: #151412;
+}
+
+.comfyTestPreview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
 .temperatureField {
   max-width: 180px;
 }
@@ -1132,6 +1304,12 @@ body {
   font-weight: 650;
 }
 
+.segmented button:disabled {
+  color: #a4abb3;
+  cursor: default;
+  opacity: 0.48;
+}
+
 .iconTextButton.subtle {
   color: #252a31;
   background: #f8fafa;
@@ -1227,6 +1405,69 @@ body {
 .settingsHint,
 .generatedMeta {
   color: #6b7280;
+}
+
+.comfyWizard {
+  border-top-color: #edf0f2;
+}
+
+.comfyWizardHeader p,
+.comfyStep p {
+  color: #6b7280;
+}
+
+.readinessItem {
+  border-color: #d7dadd;
+  color: #6b7280;
+  background: #f8fafa;
+}
+
+.readinessItem.ready {
+  border-color: #a7d7b7;
+  color: #1f7a3f;
+  background: #f1fbf4;
+}
+
+.comfyStep,
+.advancedComfySettings[open] {
+  border-color: #d7dadd;
+  background: #f8fafa;
+}
+
+.comfyStepHeader,
+.advancedComfySettings summary {
+  color: #1f2328;
+}
+
+.comfyStepHeader span {
+  color: #ffffff;
+  background: #1f2328;
+}
+
+.comfyPresetButton {
+  border-color: #d7dadd;
+  color: #1f2328;
+  background: #ffffff;
+}
+
+.comfyPresetButton:hover {
+  border-color: #aeb6bd;
+  background: #f4f6f6;
+}
+
+.comfyPresetButton small {
+  color: #6b7280;
+}
+
+.settingsStatus {
+  border-color: #d7dadd;
+  color: #1f2328;
+  background: #f8fafa;
+}
+
+.comfyTestPreview {
+  border-color: #d7dadd;
+  background: #f8fafa;
 }
 
 .panelError {
@@ -1355,4 +1596,29 @@ body {
 .generatedPreview img {
   border-color: #d7dadd;
   background: #f8fafa;
+}
+
+@media (max-width: 760px) {
+  .settingsPanel,
+  .generatePanel,
+  .imagePanel {
+    width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
+    padding: 14px;
+  }
+
+  .settingsInline,
+  .nodeMappingGrid,
+  .comfyWizardHeader,
+  .comfyPresetGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .comfyReadiness {
+    justify-content: flex-start;
+  }
+
+  .toolbar {
+    gap: 8px;
+  }
 }

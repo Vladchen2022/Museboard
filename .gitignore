@@ -5,3 +5,15 @@ src-tauri/target/
 src-tauri/gen/
 .DS_Store
 *.log
+.env
+.env.*
+!.env.example
+*.local
+*.tmp
+*.bak
+*.dmg
+*.app
+*.zip
+*.tar.gz
+.idea/
+.vscode/

@@ -41,12 +41,16 @@ describe("canvas geometry", () => {
       height: 80,
       rotation: 0,
       z: 1,
+      flippedX: true,
+      grayscale: true,
     };
     const annotation = makeAnnotation({ id: "annotation_1", x: 5, y: 6 });
 
     expect(moveLayoutItems({ asset_1: item }, { asset_1: item }, 12.4, -3.2).asset_1).toMatchObject({
       x: 22,
       y: 17,
+      flippedX: true,
+      grayscale: true,
     });
     expect(moveAnnotations([annotation], { annotation_1: annotation }, 12.4, -3.2)[0]).toMatchObject({
       x: 17,
