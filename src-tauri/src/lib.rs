@@ -5,7 +5,7 @@ mod project;
 mod util;
 mod window;
 
-use ai::lm_studio_chat;
+use ai::ai_chat;
 use comfy::{
     comfyui_check, comfyui_default_workflow, comfyui_flux_workflow, comfyui_generate, comfyui_start,
 };
@@ -26,7 +26,7 @@ pub fn run() {
             import_asset,
             import_remote_asset,
             download_remote_asset,
-            lm_studio_chat,
+            ai_chat,
             set_window_always_on_top,
             comfyui_check,
             comfyui_start,

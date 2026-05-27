@@ -11,8 +11,9 @@ import {
   X,
 } from "lucide-react";
 import { useState } from "react";
-import type { BusyAction, CreationType, Language, MuseProject } from "../types";
+import type { AiProvider, BusyAction, CreationType, Language, MuseProject } from "../types";
 import { ComfySetupWizard } from "./ComfySetupWizard";
+import { AI_PROVIDER_OPTIONS, getAiProviderOption } from "../lib/aiProviders";
 import { creationTypeOptions } from "../lib/templates";
 import { creationTypeLabel, t } from "../lib/i18n";
 
@@ -50,6 +51,24 @@ export function Toolbar({
   onLanguageChange,
 }: ToolbarProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const currentAiProvider = getAiProviderOption(project.aiSettings.provider);
+
+  function updateAiSettings(patch: Partial<MuseProject["aiSettings"]>) {
+    onProjectChange({
+      ...project,
+      aiSettings: { ...project.aiSettings, ...patch },
+    });
+  }
+
+  function handleAiProviderChange(provider: AiProvider) {
+    const preset = getAiProviderOption(provider);
+    updateAiSettings({
+      provider,
+      endpoint: preset.endpoint,
+      apiKey: "",
+      model: preset.model,
+    });
+  }
 
   return (
     <>
@@ -163,31 +182,48 @@ export function Toolbar({
                 </select>
               </label>
 
-              <div className="settingsSectionTitle">{t(language, "lmStudioSettings")}</div>
+              <div className="settingsSectionTitle">{t(language, "aiProviderSettings")}</div>
+              <label className="field">
+                <span>{t(language, "aiProvider")}</span>
+                <select
+                  value={project.aiSettings.provider}
+                  onChange={(event) => handleAiProviderChange(event.target.value as AiProvider)}
+                >
+                  {AI_PROVIDER_OPTIONS.map((provider) => (
+                    <option key={provider.id} value={provider.id}>
+                      {provider.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
               <label className="field">
                 <span>{t(language, "endpoint")}</span>
                 <input
                   value={project.aiSettings.endpoint}
-                  onChange={(event) =>
-                    onProjectChange({
-                      ...project,
-                      aiSettings: { ...project.aiSettings, endpoint: event.target.value },
-                    })
-                  }
+                  onChange={(event) => updateAiSettings({ endpoint: event.target.value })}
                 />
               </label>
+
+              {currentAiProvider.supportsApiKey && (
+                <label className="field">
+                  <span>{t(language, "apiKey")}</span>
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    placeholder={t(language, "apiKeyPlaceholder")}
+                    value={project.aiSettings.apiKey}
+                    onChange={(event) => updateAiSettings({ apiKey: event.target.value })}
+                  />
+                </label>
+              )}
 
               <label className="field">
                 <span>{t(language, "model")}</span>
                 <input
                   placeholder={t(language, "modelPlaceholder")}
                   value={project.aiSettings.model}
-                  onChange={(event) =>
-                    onProjectChange({
-                      ...project,
-                      aiSettings: { ...project.aiSettings, model: event.target.value },
-                    })
-                  }
+                  onChange={(event) => updateAiSettings({ model: event.target.value })}
                 />
               </label>
 
@@ -200,16 +236,13 @@ export function Toolbar({
                   step="0.1"
                   value={project.aiSettings.temperature}
                   onChange={(event) =>
-                    onProjectChange({
-                      ...project,
-                      aiSettings: {
-                        ...project.aiSettings,
-                        temperature: clampTemperature(Number(event.target.value)),
-                      },
+                    updateAiSettings({
+                      temperature: clampTemperature(Number(event.target.value)),
                     })
                   }
                 />
               </label>
+              <div className="settingsHint">{t(language, "aiProviderHint")}</div>
 
               <ComfySetupWizard
                 project={project}

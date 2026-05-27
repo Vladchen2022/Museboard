@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { normalizeAiSettings } from "../lib/aiProviders";
 import { prepareProjectForStorage } from "../lib/storage";
 import { createProject } from "../lib/templates";
 import type { MuseProject } from "../types";
@@ -47,5 +48,21 @@ describe("project persistence", () => {
 
     expect(stored.assets?.asset_1.dataUrl).toBeUndefined();
     expect(stored.assets?.asset_2.dataUrl).toBe("data:image/png;base64,def");
+  });
+});
+
+describe("AI provider settings", () => {
+  it("migrates legacy LM Studio settings without a provider field", () => {
+    const settings = normalizeAiSettings({
+      endpoint: "http://localhost:1234/v1",
+      model: "local-model",
+      temperature: 0.4,
+    });
+
+    expect(settings.provider).toBe("lmStudio");
+    expect(settings.endpoint).toBe("http://localhost:1234/v1");
+    expect(settings.model).toBe("local-model");
+    expect(settings.apiKey).toBe("");
+    expect(settings.temperature).toBe(0.4);
   });
 });

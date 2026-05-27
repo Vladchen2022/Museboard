@@ -82,8 +82,12 @@ export interface CanvasLayout {
   annotations: Annotation[];
 }
 
+export type AiProvider = "lmStudio" | "openai" | "deepseek" | "ollama" | "customOpenAi";
+
 export interface AiSettings {
+  provider: AiProvider;
   endpoint: string;
+  apiKey: string;
   model: string;
   temperature: number;
 }

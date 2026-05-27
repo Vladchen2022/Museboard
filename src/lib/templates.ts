@@ -1,4 +1,5 @@
 import type { AiTreeNode, CreationType, Language, MuseNode, MuseProject } from "../types";
+import { defaultAiSettings } from "./aiProviders";
 import { createId, nowIso } from "./id";
 
 export const creationTypeLabels: Record<CreationType, string> = {
@@ -261,11 +262,7 @@ export function createProject(
     assets: {},
     assetLinks: [],
     layouts: {},
-    aiSettings: {
-      endpoint: "http://localhost:1234/v1",
-      model: "",
-      temperature: 0.7,
-    },
+    aiSettings: { ...defaultAiSettings },
     comfySettings: {
       endpoint: "http://127.0.0.1:8188",
       autoStart: true,

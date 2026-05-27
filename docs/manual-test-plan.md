@@ -1,6 +1,6 @@
 # Manual Test Plan
 
-These tests require the user's real machine, installed LM Studio models, and installed ComfyUI environment.
+These tests require the user's real machine, at least one configured text model provider, and installed ComfyUI environment.
 
 ## First Launch
 
@@ -10,14 +10,17 @@ These tests require the user's real machine, installed LM Studio models, and ins
 4. Switch language to English, close settings, reopen settings.
 5. Confirm language setting persists after app restart.
 
-## LM Studio
+## Text Model Providers
 
-1. Start LM Studio local server.
-2. Enter endpoint and model name.
-3. Click `随机导图`.
-4. Select a node and click `生成说明`.
-5. Select a node and click `生成下一级`.
-6. Confirm generated text is visual, concrete, and in the selected UI language.
+1. Choose `LM Studio`, enter endpoint `http://localhost:1234/v1`, and enter a loaded model name.
+2. Click `随机导图`.
+3. Select a node and click `生成说明`.
+4. Select a node and click `生成下一级`.
+5. Confirm generated text is visual, concrete, and in the selected UI language.
+6. Switch to `Ollama`, enter endpoint `http://localhost:11434`, and enter a pulled model name.
+7. Generate one node description.
+8. If OpenAI or DeepSeek keys are available, switch to that provider, enter endpoint, API key, and model name, then generate one brief.
+9. Close and reopen Museboard. Confirm provider, endpoint, model, API key, temperature, and language persist.
 
 ## ComfyUI
 
@@ -60,5 +63,5 @@ These tests require the user's real machine, installed LM Studio models, and ins
 2. Confirm the error tells the user what to do.
 3. Import non-API workflow JSON.
 4. Confirm the workflow error is understandable.
-5. Temporarily use a wrong model name in LM Studio.
+5. Temporarily use a wrong model name in the selected text model provider.
 6. Confirm Museboard does not crash.

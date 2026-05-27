@@ -5,6 +5,7 @@ import { getTemplateTree } from "./templates";
 import { creationTypeLabel } from "./i18n";
 import { getNodePath, getSiblingNodes, treeToText } from "./tree";
 import { fetchWithTimeout } from "./http";
+import { getAiProviderOption } from "./aiProviders";
 
 interface ChatResponse {
   choices?: Array<{
@@ -12,6 +13,12 @@ interface ChatResponse {
       content?: string;
     };
   }>;
+}
+
+interface OllamaChatResponse {
+  message?: {
+    content?: string;
+  };
 }
 
 export async function generateChildCandidates(
@@ -218,10 +225,14 @@ function languageInstruction(language: Language): string {
 
 async function chatJson<T>(settings: AiSettings, system: string, user: string): Promise<T> {
   if (!settings.endpoint.trim()) {
-    throw new Error("未配置 LM Studio endpoint。");
+    throw new Error("未配置 AI endpoint。请在设置里选择模型服务并填写地址。");
   }
   if (!settings.model.trim()) {
-    throw new Error("未填写模型名。请在右上角 AI 设置中填写 LM Studio 当前加载的模型名。");
+    throw new Error("未填写模型名。请在设置里填写当前模型服务可用的模型名。");
+  }
+  const provider = getAiProviderOption(settings.provider);
+  if (provider.requiresApiKey && !settings.apiKey.trim()) {
+    throw new Error(`${provider.label} 需要 API Key。请在设置里填写后再重试。`);
   }
 
   const endpoint = settings.endpoint.replace(/\/$/, "");
@@ -229,8 +240,10 @@ async function chatJson<T>(settings: AiSettings, system: string, user: string): 
 
   try {
     content = isTauriRuntime()
-      ? await invoke<string>("lm_studio_chat", {
+      ? await invoke<string>("ai_chat", {
+          provider: settings.provider,
           endpoint,
+          apiKey: settings.apiKey,
           model: settings.model,
           temperature: settings.temperature,
           system,
@@ -239,16 +252,16 @@ async function chatJson<T>(settings: AiSettings, system: string, user: string): 
       : await browserChatContent(settings, endpoint, system, user);
   } catch (error) {
     throw new Error(
-      `无法连接 LM Studio：${error instanceof Error ? error.message : String(error)}`,
+      `无法连接 ${provider.label}：${error instanceof Error ? error.message : String(error)}`,
     );
   }
 
-  if (!content) throw new Error("LM Studio 返回内容为空。");
+  if (!content) throw new Error(`${provider.label} 返回内容为空。`);
 
   try {
     return JSON.parse(extractJsonObject(content)) as T;
   } catch {
-    throw new Error("LM Studio 返回的内容不是合法 JSON。");
+    throw new Error(`${provider.label} 返回的内容不是合法 JSON。`);
   }
 }
 
@@ -258,11 +271,34 @@ async function browserChatContent(
   system: string,
   user: string,
 ): Promise<string> {
+  const provider = getAiProviderOption(settings.provider);
+  if (settings.provider === "openai" || settings.provider === "deepseek") {
+    throw new Error("OpenAI 和 DeepSeek 只能在桌面 App 中调用；浏览器预览会暴露 API Key 且通常会被 CORS 拦截。");
+  }
+
+  if (provider.protocol === "ollama") {
+    return browserOllamaChatContent(settings, endpoint, system, user);
+  }
+
+  return browserOpenAiCompatibleChatContent(settings, endpoint, system, user);
+}
+
+async function browserOpenAiCompatibleChatContent(
+  settings: AiSettings,
+  endpoint: string,
+  system: string,
+  user: string,
+): Promise<string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (settings.apiKey.trim()) {
+    headers.Authorization = `Bearer ${settings.apiKey.trim()}`;
+  }
+
   const response = await fetchWithTimeout(
     `${browserEndpoint(endpoint)}/chat/completions`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify({
         model: settings.model,
         temperature: settings.temperature,
@@ -277,11 +313,46 @@ async function browserChatContent(
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
-    throw new Error(`LM Studio 请求失败：HTTP ${response.status}${body ? `，${body}` : ""}`);
+    throw new Error(`AI 请求失败：HTTP ${response.status}${body ? `，${body}` : ""}`);
   }
 
   const payload = (await response.json()) as ChatResponse;
   return payload.choices?.[0]?.message?.content ?? "";
+}
+
+async function browserOllamaChatContent(
+  settings: AiSettings,
+  endpoint: string,
+  system: string,
+  user: string,
+): Promise<string> {
+  const response = await fetchWithTimeout(
+    `${browserEndpoint(endpoint)}/api/chat`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: settings.model,
+        stream: false,
+        options: {
+          temperature: settings.temperature,
+        },
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+      }),
+    },
+    120000,
+  );
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`Ollama 请求失败：HTTP ${response.status}${body ? `，${body}` : ""}`);
+  }
+
+  const payload = (await response.json()) as OllamaChatResponse;
+  return payload.message?.content ?? "";
 }
 
 function browserEndpoint(endpoint: string): string {
@@ -293,6 +364,15 @@ function browserEndpoint(endpoint: string): string {
       url.port === "1234"
     ) {
       return `/lm-studio-proxy${url.pathname.replace(/\/$/, "")}`;
+    }
+    if (
+      url.protocol === "http:" &&
+      ["localhost", "127.0.0.1"].includes(url.hostname) &&
+      url.port === "11434"
+    ) {
+      return url.pathname.replace(/\/$/, "")
+        ? `/ollama-proxy${url.pathname.replace(/\/$/, "")}`
+        : "/ollama-proxy";
     }
   } catch {
     return endpoint;

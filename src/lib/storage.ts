@@ -8,6 +8,7 @@ import type {
   ComfySettings,
   MuseProject,
 } from "../types";
+import { defaultAiSettings, normalizeAiSettings } from "./aiProviders";
 import { createId, nowIso } from "./id";
 
 declare global {
@@ -21,12 +22,6 @@ const LOCAL_PREFERENCES_KEY = "museboard.preferences.v1";
 const ASSET_SRC_CACHE_LIMIT = 80;
 const DEFAULT_ASSET_PREVIEW_SIZE = 900;
 const assetSrcCache = new Map<string, string>();
-
-const defaultAiSettings: AiSettings = {
-  endpoint: "http://localhost:1234/v1",
-  model: "",
-  temperature: 0.7,
-};
 
 const defaultComfySettings: ComfySettings = {
   endpoint: "http://127.0.0.1:8188",
@@ -102,14 +97,7 @@ export function loadAppPreferences(): AppPreferences {
     if (!raw) return fallback;
     const parsed = JSON.parse(raw) as Partial<AppPreferences>;
     return {
-      aiSettings: {
-        endpoint: parsed.aiSettings?.endpoint || fallback.aiSettings.endpoint,
-        model: parsed.aiSettings?.model || fallback.aiSettings.model,
-        temperature:
-          typeof parsed.aiSettings?.temperature === "number"
-            ? parsed.aiSettings.temperature
-            : fallback.aiSettings.temperature,
-      },
+      aiSettings: normalizeAiSettings(parsed.aiSettings),
       comfySettings: mergeComfySettings(parsed.comfySettings),
       language: parsed.language === "en" ? "en" : "zh",
     };
@@ -424,10 +412,7 @@ function fileToDataUrl(file: File): Promise<string> {
 function normalizeProject(project: Partial<MuseProject>): MuseProject {
   return {
     ...(project as MuseProject),
-    aiSettings: {
-      ...defaultAiSettings,
-      ...(project.aiSettings ?? {}),
-    },
+    aiSettings: normalizeAiSettings(project.aiSettings),
     comfySettings: mergeComfySettings(project.comfySettings),
   };
 }

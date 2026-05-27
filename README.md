@@ -15,7 +15,7 @@ Museboard is an MVP. It is usable for local testing, but public distribution is 
 - Platform priority: macOS
 - Desktop framework: Tauri 2
 - Frontend: React + TypeScript + Vite
-- Text model integration: LM Studio OpenAI-compatible local API
+- Text model integration: LM Studio, OpenAI API, DeepSeek API, Ollama, and custom OpenAI-compatible endpoints
 - Image generation integration: local ComfyUI, with Flux-oriented preset support
 - Distribution status: local unsigned macOS app/DMG only
 
@@ -95,9 +95,21 @@ Generated local release artifacts:
 - `src-tauri/target/release/bundle/macos/Museboard.app`
 - `src-tauri/target/release/bundle/dmg/Museboard_0.1.0_aarch64.dmg`
 
-## LM Studio Setup
+## Text Model Setup
 
-Museboard defaults to the LM Studio OpenAI-compatible endpoint:
+Use `Settings -> Text Model`.
+
+Supported providers:
+
+- `LM Studio`: local OpenAI-compatible endpoint, default `http://localhost:1234/v1`
+- `OpenAI API`: default `https://api.openai.com/v1`, requires an API key
+- `DeepSeek API`: default `https://api.deepseek.com`, requires an API key
+- `Ollama`: native local endpoint, default `http://localhost:11434`
+- `OpenAI-compatible`: custom endpoint for other compatible servers
+
+API keys are saved only in local app preferences. They are not written into `project.museboard.json`.
+
+### LM Studio
 
 ```text
 http://localhost:1234/v1
@@ -109,9 +121,33 @@ In LM Studio:
 2. Start the local server.
 3. Copy the exact model name.
 4. Open Museboard settings.
-5. Paste the endpoint and model name into the LM Studio section.
+5. Paste the endpoint and model name into the Text Model section.
 
-LM Studio powers:
+### OpenAI API
+
+1. Create an API key in your OpenAI account.
+2. In Museboard settings, choose `OpenAI API`.
+3. Keep endpoint as `https://api.openai.com/v1`.
+4. Paste the API key.
+5. Enter the model name you want to use.
+
+### DeepSeek API
+
+1. Create a DeepSeek API key.
+2. In Museboard settings, choose `DeepSeek API`.
+3. Keep endpoint as `https://api.deepseek.com`.
+4. Paste the API key.
+5. Use a current DeepSeek chat model name, such as `deepseek-v4-flash`, unless DeepSeek changes its model list.
+
+### Ollama
+
+1. Install Ollama and pull a chat model.
+2. Start Ollama.
+3. In Museboard settings, choose `Ollama`.
+4. Keep endpoint as `http://localhost:11434`.
+5. Enter the local model name, for example `qwen3:8b`.
+
+The selected text model powers:
 
 - random mind-map generation
 - missing-node completion
@@ -152,9 +188,9 @@ assets/
 - canvas layouts
 - annotations
 - image links
-- AI and ComfyUI settings
+- project metadata needed to reopen the board
 
-Imported images are copied into `assets/`. Desktop projects load canvas images through generated previews so large boards do not keep full base64 images in memory.
+Runtime text-model and ComfyUI settings are stored in local app preferences, not in project files. Imported images are copied into `assets/`. Desktop projects load canvas images through generated previews so large boards do not keep full base64 images in memory.
 
 ## Development
 
@@ -179,6 +215,7 @@ rustup component add rustfmt clippy
 ## Documentation
 
 - [GitHub publishing guide](docs/github-publishing.md)
+- [Text model setup guide](docs/ai-provider-setup.md)
 - [ComfyUI setup guide](docs/comfyui-setup.md)
 - [Manual test plan](docs/manual-test-plan.md)
 - [Release checklist](docs/release-checklist.md)

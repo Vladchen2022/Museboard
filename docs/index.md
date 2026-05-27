@@ -11,7 +11,7 @@ Museboard combines four parts:
 - **Brief area**: a generated or manually edited description of the image.
 - **Mind map**: a structured tree for world, time, place, character, event, mood, composition, and other design decisions.
 - **Canvas**: a PureRef-like reference board linked to the selected node.
-- **Local AI bridge**: LM Studio for text generation and ComfyUI for image generation.
+- **AI bridge**: LM Studio, OpenAI API, DeepSeek API, or Ollama for text generation, plus ComfyUI for image generation.
 
 ## Why It Exists
 
@@ -48,6 +48,7 @@ Museboard is open source under the MIT License.
 ## Links
 
 - [Repository README](https://github.com/Vladchen2022/Museboard#readme)
+- [Text model setup](ai-provider-setup.md)
 - [ComfyUI setup](comfyui-setup.md)
 - [Manual test plan](manual-test-plan.md)
 - [Release checklist](release-checklist.md)

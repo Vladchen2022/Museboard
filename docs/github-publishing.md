@@ -30,7 +30,7 @@ Use these settings:
 
 - Owner: `Vladchen2022`
 - Repository name: `Museboard`
-- Description: `A macOS-first visual planning app for mind maps, reference boards, LM Studio, and ComfyUI.`
+- Description: `A macOS-first visual planning app for mind maps, reference boards, text models, and ComfyUI.`
 - Visibility: Public, if you want others to see it
 - Add README: off
 - Add .gitignore: off
@@ -84,13 +84,13 @@ In the repository right sidebar, set:
 
 ```text
 Description:
-A macOS-first visual planning app for mind maps, reference boards, LM Studio, and ComfyUI.
+A macOS-first visual planning app for mind maps, reference boards, text models, and ComfyUI.
 
 Website:
 https://vladchen2022.github.io/Museboard/
 
 Topics:
-tauri, react, typescript, comfyui, lm-studio, mind-map, reference-board, macos
+tauri, react, typescript, comfyui, lm-studio, ollama, openai, deepseek, mind-map, reference-board, macos
 ```
 
 ## 5. First Public Release

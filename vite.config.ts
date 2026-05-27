@@ -13,6 +13,11 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/lm-studio-proxy/, ""),
       },
+      "/ollama-proxy": {
+        target: "http://localhost:11434",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/ollama-proxy/, ""),
+      },
       "/comfyui-proxy": {
         target: "http://127.0.0.1:8188",
         changeOrigin: true,
