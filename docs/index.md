@@ -41,6 +41,10 @@ Museboard is currently an MVP for local macOS testing.
 
 It is not yet a polished public installer. Public macOS distribution still needs signing and notarization.
 
+## License
+
+Museboard is open source under the MIT License.
+
 ## Links
 
 - [Repository README](https://github.com/Vladchen2022/Museboard#readme)

@@ -193,4 +193,4 @@ rustup component add rustfmt clippy
 
 ## License
 
-No open-source license has been selected yet. Until a license is added, the source is published for viewing and evaluation only; reuse, redistribution, and derivative works are not explicitly permitted.
+Museboard is open source under the [MIT License](LICENSE).

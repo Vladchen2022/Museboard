@@ -3,6 +3,7 @@ name = "museboard"
 version = "0.1.0"
 description = "Museboard desktop app"
 authors = ["Museboard"]
+license = "MIT"
 edition = "2021"
 
 [lib]

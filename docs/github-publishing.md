@@ -34,7 +34,7 @@ Use these settings:
 - Visibility: Public, if you want others to see it
 - Add README: off
 - Add .gitignore: off
-- Add license: off, unless you have already chosen one
+- Add license: off
 
 Do not initialize the repository with files. This local project already has the files.
 
@@ -110,14 +110,10 @@ src-tauri/target/release/bundle/dmg/Museboard_0.1.0_aarch64.dmg
 
 Important: this DMG is unsigned unless signing and notarization are configured. For real public distribution, finish Developer ID signing and macOS notarization first.
 
-## 6. License Decision
+## 6. License
 
-No open-source license has been selected yet.
+Museboard uses the MIT License.
 
-Practical choices:
+This means people may use, copy, modify, publish, distribute, sublicense, and sell copies of the software, as long as they include the copyright notice and license text.
 
-- MIT: permissive, simple, common for apps and prototypes.
-- Apache-2.0: permissive, includes explicit patent language.
-- No license: people can view the code, but reuse is not clearly permitted.
-
-Do not add a license casually. It changes what other people are allowed to do with the code.
+The license does not provide warranty or liability protection beyond the standard MIT terms in `LICENSE`.
