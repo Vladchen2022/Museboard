@@ -54,6 +54,12 @@ const MAX_ZOOM = 4;
 const FIT_PADDING = 72;
 const THUMBNAIL_SIZE = 75;
 
+interface CanvasViewState {
+  zoom: number;
+  scrollLeft: number;
+  scrollTop: number;
+}
+
 interface CanvasProps {
   project: MuseProject;
   projectDir: string | null;
@@ -145,6 +151,7 @@ export function Canvas({
   const boardRef = useRef<HTMLDivElement | null>(null);
   const draftLayoutRef = useRef<CanvasLayout | null>(null);
   const zoomRef = useRef(1);
+  const focusReturnViewRef = useRef<CanvasViewState | null>(null);
   const [emptyPromptCenter, setEmptyPromptCenter] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
@@ -235,10 +242,12 @@ export function Canvas({
   useEffect(() => {
     draftLayoutRef.current = null;
     setDraftLayout(null);
+    focusReturnViewRef.current = null;
   }, [selectedNodeId]);
 
   useEffect(() => {
     setSelectedAssetIds((current) => current.filter((assetId) => visibleAssetIds.includes(assetId)));
+    focusReturnViewRef.current = null;
   }, [visibleAssetIds]);
 
   useEffect(() => {
@@ -247,9 +256,8 @@ export function Canvas({
       if (target?.closest("input, textarea, button, select")) return;
 
       if (event.code === "Space") {
-        if (!selectedAssetIds.length) return;
         event.preventDefault();
-        fitAssetIdsToViewport(selectedAssetIds);
+        toggleSpaceFocusView();
         return;
       }
 
@@ -263,7 +271,7 @@ export function Canvas({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedAssetIds, selectedAnnotationIds, project, selectedNodeId, layout]);
+  }, [selectedAssetIds, selectedAnnotationIds, project, selectedNodeId, layout, visibleAssetIds]);
 
   useEffect(() => {
     if (dragState === null) return;
@@ -579,6 +587,7 @@ export function Canvas({
     const nextZoom = clampZoom(currentZoom * Math.exp(-event.deltaY * 0.0014));
 
     setZoom(nextZoom);
+    focusReturnViewRef.current = null;
     requestAnimationFrame(() => {
       viewport.scrollLeft = Math.max(0, Math.round(boardX * nextZoom - cursorX));
       viewport.scrollTop = Math.max(0, Math.round(boardY * nextZoom - cursorY));
@@ -586,7 +595,19 @@ export function Canvas({
     });
   }
 
-  function fitAssetIdsToViewport(assetIds: string[]) {
+  function applyCanvasViewState(viewState: CanvasViewState) {
+    const viewport = canvasRef.current;
+    if (!viewport) return;
+
+    setZoom(viewState.zoom);
+    requestAnimationFrame(() => {
+      viewport.scrollLeft = viewState.scrollLeft;
+      viewport.scrollTop = viewState.scrollTop;
+      updateViewportState(viewport, viewState.zoom);
+    });
+  }
+
+  function fitAssetIdsToViewport(assetIds: string[], options: { preserveReturnView: boolean }) {
     const viewport = canvasRef.current;
     if (!viewport || !assetIds.length) return;
 
@@ -603,12 +624,33 @@ export function Canvas({
       { minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM, padding: FIT_PADDING },
     );
 
-    setZoom(fit.zoom);
-    requestAnimationFrame(() => {
-      viewport.scrollLeft = fit.scrollLeft;
-      viewport.scrollTop = fit.scrollTop;
-      updateViewportState(viewport, fit.zoom);
-    });
+    if (!options.preserveReturnView) focusReturnViewRef.current = null;
+    applyCanvasViewState(fit);
+  }
+
+  function toggleSpaceFocusView() {
+    const viewport = canvasRef.current;
+    if (!viewport) return;
+
+    const returnView = focusReturnViewRef.current;
+    if (returnView) {
+      focusReturnViewRef.current = null;
+      applyCanvasViewState(returnView);
+      return;
+    }
+
+    const targetAssetIds = selectedAssetIds.length ? selectedAssetIds : visibleAssetIds;
+    if (!targetAssetIds.length) {
+      onStatus(t(language, "selectImageFirst"));
+      return;
+    }
+
+    focusReturnViewRef.current = {
+      zoom: zoomRef.current,
+      scrollLeft: viewport.scrollLeft,
+      scrollTop: viewport.scrollTop,
+    };
+    fitAssetIdsToViewport(targetAssetIds, { preserveReturnView: true });
   }
 
   function fitAllImagesToViewport() {
@@ -617,7 +659,7 @@ export function Canvas({
       return;
     }
 
-    fitAssetIdsToViewport(visibleAssetIds);
+    fitAssetIdsToViewport(visibleAssetIds, { preserveReturnView: false });
     onStatus(t(language, "fitAllImagesDone"));
   }
 
