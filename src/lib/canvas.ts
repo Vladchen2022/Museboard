@@ -86,6 +86,60 @@ export function isItemNearViewport(
   return boxesIntersect(viewport, item);
 }
 
+export function scaledViewportBox(
+  metrics: ViewportMetrics,
+  zoom: number,
+  margin: number,
+): Box {
+  const scale = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+  return expandedViewportBox(
+    {
+      scrollLeft: metrics.scrollLeft / scale,
+      scrollTop: metrics.scrollTop / scale,
+      clientWidth: metrics.clientWidth / scale,
+      clientHeight: metrics.clientHeight / scale,
+    },
+    margin,
+  );
+}
+
+export function layoutItemsBounds(
+  items: Array<{ x: number; y: number; width: number; height: number }>,
+): Box | null {
+  if (!items.length) return null;
+
+  const left = Math.min(...items.map((item) => item.x));
+  const top = Math.min(...items.map((item) => item.y));
+  const right = Math.max(...items.map((item) => item.x + item.width));
+  const bottom = Math.max(...items.map((item) => item.y + item.height));
+
+  return {
+    left,
+    top,
+    width: Math.max(1, right - left),
+    height: Math.max(1, bottom - top),
+  };
+}
+
+export function fitBoxIntoViewport(
+  box: Box,
+  viewport: { width: number; height: number },
+  options: { minZoom: number; maxZoom: number; padding: number },
+): { zoom: number; scrollLeft: number; scrollTop: number } {
+  const availableWidth = Math.max(1, viewport.width - options.padding * 2);
+  const availableHeight = Math.max(1, viewport.height - options.padding * 2);
+  const unclampedZoom = Math.min(availableWidth / box.width, availableHeight / box.height);
+  const zoom = Math.min(options.maxZoom, Math.max(options.minZoom, unclampedZoom));
+  const centerX = box.left + box.width / 2;
+  const centerY = box.top + box.height / 2;
+
+  return {
+    zoom,
+    scrollLeft: Math.max(0, Math.round(centerX * zoom - viewport.width / 2)),
+    scrollTop: Math.max(0, Math.round(centerY * zoom - viewport.height / 2)),
+  };
+}
+
 export function moveLayoutItems(
   currentItems: Record<string, LayoutItem>,
   initials: Record<string, LayoutItem>,

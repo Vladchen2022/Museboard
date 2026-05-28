@@ -11,6 +11,7 @@ interface AssetViewProps {
   language: Language;
   item: LayoutItem;
   selected: boolean;
+  onToggleThumbnail: () => void;
   onMoveStart: (event: React.PointerEvent<HTMLElement>) => void;
   onResizeStart: (event: React.PointerEvent<HTMLElement>) => void;
 }
@@ -22,6 +23,7 @@ export function AssetView({
   language,
   item,
   selected,
+  onToggleThumbnail,
   onMoveStart,
   onResizeStart,
 }: AssetViewProps) {
@@ -77,6 +79,10 @@ export function AssetView({
       }}
       onClick={(event) => {
         event.stopPropagation();
+      }}
+      onDoubleClick={(event) => {
+        event.stopPropagation();
+        onToggleThumbnail();
       }}
       onPointerDown={onMoveStart}
     >

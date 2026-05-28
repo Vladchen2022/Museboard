@@ -60,6 +60,9 @@ export interface LayoutItem {
   hidden?: boolean;
   flippedX?: boolean;
   grayscale?: boolean;
+  thumbnail?: boolean;
+  thumbnailOriginalWidth?: number;
+  thumbnailOriginalHeight?: number;
 }
 
 export interface Annotation {

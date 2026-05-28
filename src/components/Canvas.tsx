@@ -4,6 +4,7 @@ import {
   Eye,
   FlipHorizontal2,
   ImagePlus,
+  Maximize2,
   MousePointer2,
   PanelTopClose,
   PanelTopOpen,
@@ -28,14 +29,16 @@ import {
   annotationBounds,
   boxesIntersect,
   createAnnotation,
-  expandedViewportBox,
   getDroppedImageFiles,
   getDroppedImageUrls,
+  fitBoxIntoViewport,
   isItemNearViewport,
+  layoutItemsBounds,
   moveAnnotations,
   moveLayoutItems,
   normalizedBox,
   resizeAnnotation,
+  scaledViewportBox,
   updateDrawnAnnotation,
 } from "../lib/canvas";
 import { AnnotationView } from "./canvas/AnnotationView";
@@ -44,6 +47,12 @@ import { t } from "../lib/i18n";
 import { ensureLayout, getVisibleAssetIds, removeVisibleAssets, touchProject } from "../lib/tree";
 
 const IMAGE_LOAD_MARGIN = 520;
+const BOARD_WIDTH = 2400;
+const BOARD_HEIGHT = 1700;
+const MIN_ZOOM = 0.2;
+const MAX_ZOOM = 4;
+const FIT_PADDING = 72;
+const THUMBNAIL_SIZE = 75;
 
 interface CanvasProps {
   project: MuseProject;
@@ -135,13 +144,19 @@ export function Canvas({
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const boardRef = useRef<HTMLDivElement | null>(null);
   const draftLayoutRef = useRef<CanvasLayout | null>(null);
+  const zoomRef = useRef(1);
   const [emptyPromptCenter, setEmptyPromptCenter] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
   const [selectedAnnotationIds, setSelectedAnnotationIds] = useState<string[]>([]);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [draftLayout, setDraftLayout] = useState<CanvasLayout | null>(null);
   const [viewportBox, setViewportBox] = useState(() =>
-    expandedViewportBox({ scrollLeft: 0, scrollTop: 0, clientWidth: 0, clientHeight: 0 }, IMAGE_LOAD_MARGIN),
+    scaledViewportBox(
+      { scrollLeft: 0, scrollTop: 0, clientWidth: 0, clientHeight: 0 },
+      1,
+      IMAGE_LOAD_MARGIN,
+    ),
   );
   const node = project.nodes[selectedNodeId];
   const committedLayout = ensureLayout(project, selectedNodeId);
@@ -168,42 +183,54 @@ export function Canvas({
       return item.grayscale;
     });
 
+  zoomRef.current = zoom;
+
+  function updateViewportState(viewport = canvasRef.current, activeZoom = zoomRef.current) {
+    if (!viewport) return;
+    const rect = viewport.getBoundingClientRect();
+    setEmptyPromptCenter({
+      x: Math.round(rect.left + rect.width / 2),
+      y: Math.round(rect.top + rect.height / 2),
+    });
+    setViewportBox(
+      scaledViewportBox(
+        {
+          scrollLeft: viewport.scrollLeft,
+          scrollTop: viewport.scrollTop,
+          clientWidth: viewport.clientWidth,
+          clientHeight: viewport.clientHeight,
+        },
+        activeZoom,
+        IMAGE_LOAD_MARGIN,
+      ),
+    );
+  }
+
   useEffect(() => {
     const viewport = canvasRef.current;
     if (!viewport) return;
     const activeViewport = viewport;
 
-    function updateEmptyPromptCenter() {
-      const rect = activeViewport.getBoundingClientRect();
-      setEmptyPromptCenter({
-        x: Math.round(rect.left + rect.width / 2),
-        y: Math.round(rect.top + rect.height / 2),
-      });
-      setViewportBox(
-        expandedViewportBox(
-          {
-            scrollLeft: activeViewport.scrollLeft,
-            scrollTop: activeViewport.scrollTop,
-            clientWidth: activeViewport.clientWidth,
-            clientHeight: activeViewport.clientHeight,
-          },
-          IMAGE_LOAD_MARGIN,
-        ),
-      );
+    function handleViewportChange() {
+      updateViewportState(activeViewport);
     }
 
-    updateEmptyPromptCenter();
-    activeViewport.addEventListener("scroll", updateEmptyPromptCenter, { passive: true });
-    window.addEventListener("resize", updateEmptyPromptCenter);
-    const observer = new ResizeObserver(updateEmptyPromptCenter);
+    handleViewportChange();
+    activeViewport.addEventListener("scroll", handleViewportChange, { passive: true });
+    window.addEventListener("resize", handleViewportChange);
+    const observer = new ResizeObserver(handleViewportChange);
     observer.observe(activeViewport);
 
     return () => {
-      activeViewport.removeEventListener("scroll", updateEmptyPromptCenter);
-      window.removeEventListener("resize", updateEmptyPromptCenter);
+      activeViewport.removeEventListener("scroll", handleViewportChange);
+      window.removeEventListener("resize", handleViewportChange);
       observer.disconnect();
     };
   }, []);
+
+  useEffect(() => {
+    updateViewportState();
+  }, [zoom]);
 
   useEffect(() => {
     draftLayoutRef.current = null;
@@ -216,9 +243,17 @@ export function Canvas({
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key !== "Delete" && event.key !== "Backspace") return;
       const target = event.target as HTMLElement | null;
-      if (target?.closest("input, textarea")) return;
+      if (target?.closest("input, textarea, button, select")) return;
+
+      if (event.code === "Space") {
+        if (!selectedAssetIds.length) return;
+        event.preventDefault();
+        fitAssetIdsToViewport(selectedAssetIds);
+        return;
+      }
+
+      if (event.key !== "Delete" && event.key !== "Backspace") return;
 
       if (selectedAssetIds.length || selectedAnnotationIds.length) {
         event.preventDefault();
@@ -228,15 +263,16 @@ export function Canvas({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedAssetIds, selectedAnnotationIds, project, selectedNodeId]);
+  }, [selectedAssetIds, selectedAnnotationIds, project, selectedNodeId, layout]);
 
   useEffect(() => {
     if (dragState === null) return;
     const activeDrag: NonNullable<DragState> = dragState;
 
     function handleMove(event: PointerEvent) {
-      const dx = event.clientX - activeDrag.startX;
-      const dy = event.clientY - activeDrag.startY;
+      const scale = zoomRef.current || 1;
+      const dx = (event.clientX - activeDrag.startX) / scale;
+      const dy = (event.clientY - activeDrag.startY) / scale;
 
       if (activeDrag.kind === "move-items") {
         updateDraftLayout((current) => ({
@@ -529,12 +565,100 @@ export function Canvas({
     onStatus(t(language, "restoredImages"));
   }
 
+  function handleViewportWheel(event: React.WheelEvent<HTMLDivElement>) {
+    const viewport = canvasRef.current;
+    if (!viewport) return;
+
+    event.preventDefault();
+    const rect = viewport.getBoundingClientRect();
+    const cursorX = event.clientX - rect.left;
+    const cursorY = event.clientY - rect.top;
+    const currentZoom = zoomRef.current;
+    const boardX = (viewport.scrollLeft + cursorX) / currentZoom;
+    const boardY = (viewport.scrollTop + cursorY) / currentZoom;
+    const nextZoom = clampZoom(currentZoom * Math.exp(-event.deltaY * 0.0014));
+
+    setZoom(nextZoom);
+    requestAnimationFrame(() => {
+      viewport.scrollLeft = Math.max(0, Math.round(boardX * nextZoom - cursorX));
+      viewport.scrollTop = Math.max(0, Math.round(boardY * nextZoom - cursorY));
+      updateViewportState(viewport, nextZoom);
+    });
+  }
+
+  function fitAssetIdsToViewport(assetIds: string[]) {
+    const viewport = canvasRef.current;
+    if (!viewport || !assetIds.length) return;
+
+    const box = layoutItemsBounds(
+      assetIds.map((assetId) =>
+        defaultLayoutItem(assetId, visibleAssetIds.indexOf(assetId)),
+      ),
+    );
+    if (!box) return;
+
+    const fit = fitBoxIntoViewport(
+      box,
+      { width: viewport.clientWidth, height: viewport.clientHeight },
+      { minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM, padding: FIT_PADDING },
+    );
+
+    setZoom(fit.zoom);
+    requestAnimationFrame(() => {
+      viewport.scrollLeft = fit.scrollLeft;
+      viewport.scrollTop = fit.scrollTop;
+      updateViewportState(viewport, fit.zoom);
+    });
+  }
+
+  function fitAllImagesToViewport() {
+    if (!visibleAssetIds.length) {
+      onStatus(t(language, "selectImageFirst"));
+      return;
+    }
+
+    fitAssetIdsToViewport(visibleAssetIds);
+    onStatus(t(language, "fitAllImagesDone"));
+  }
+
+  function toggleThumbnail(assetId: string) {
+    updateLayout((current) => {
+      const item = defaultLayoutItemFrom(current, assetId, visibleAssetIds.indexOf(assetId));
+      const nextItem = item.thumbnail
+        ? {
+            ...item,
+            width: Math.max(1, item.thumbnailOriginalWidth ?? 220),
+            height: Math.max(1, item.thumbnailOriginalHeight ?? 160),
+            thumbnail: false,
+            thumbnailOriginalWidth: undefined,
+            thumbnailOriginalHeight: undefined,
+          }
+        : {
+            ...item,
+            width: THUMBNAIL_SIZE,
+            height: THUMBNAIL_SIZE,
+            thumbnail: true,
+            thumbnailOriginalWidth: item.width,
+            thumbnailOriginalHeight: item.height,
+          };
+
+      return {
+        ...current,
+        items: {
+          ...current.items,
+          [assetId]: nextItem,
+        },
+      };
+    });
+  }
+
   function getCanvasPoint(clientX: number, clientY: number) {
     const rect = boardRef.current?.getBoundingClientRect();
     if (!rect) return null;
+    const scale = zoomRef.current || 1;
     return {
-      x: Math.round(clientX - rect.left),
-      y: Math.round(clientY - rect.top),
+      x: Math.round((clientX - rect.left) / scale),
+      y: Math.round((clientY - rect.top) / scale),
     };
   }
 
@@ -646,6 +770,14 @@ export function Canvas({
         <div className="segmented">
           <button
             type="button"
+            title={t(language, "fitAllImages")}
+            onClick={fitAllImagesToViewport}
+            disabled={!visibleAssetIds.length}
+          >
+            <Maximize2 size={16} />
+          </button>
+          <button
+            type="button"
             title={t(language, "mirrorImage")}
             onClick={toggleMirrorSelected}
             disabled={!selectedAssetId}
@@ -696,7 +828,7 @@ export function Canvas({
         />
       </div>
 
-      <div ref={canvasRef} className="canvasViewport">
+      <div ref={canvasRef} className="canvasViewport" onWheel={handleViewportWheel}>
         {visibleAssetIds.length === 0 && (
           <div
             className="emptyCanvas"
@@ -707,32 +839,95 @@ export function Canvas({
           </div>
         )}
         <div
-          ref={boardRef}
-          className={`canvasBoard ${tool !== "select" ? "annotationMode" : ""}`}
-          onPointerDown={handleBoardPointerDown}
+          className="canvasBoardSpace"
+          style={{
+            width: Math.round(BOARD_WIDTH * zoom),
+            height: Math.round(BOARD_HEIGHT * zoom),
+          }}
         >
-          {visibleAssetIds.map((assetId, index) => {
-            const asset = project.assets[assetId];
-            if (!asset) return null;
-            const item = defaultLayoutItem(assetId, index);
-            const shouldLoad = isItemNearViewport(item, viewportBox);
-            return (
-              <AssetView
-                key={assetId}
-                asset={asset}
-                projectDir={projectDir}
-                shouldLoad={shouldLoad}
+          <div
+            ref={boardRef}
+            className={`canvasBoard ${tool !== "select" ? "annotationMode" : ""}`}
+            style={{ transform: `scale(${zoom})` }}
+            onPointerDown={handleBoardPointerDown}
+          >
+            {visibleAssetIds.map((assetId, index) => {
+              const asset = project.assets[assetId];
+              if (!asset) return null;
+              const item = defaultLayoutItem(assetId, index);
+              const shouldLoad = isItemNearViewport(item, viewportBox);
+              return (
+                <AssetView
+                  key={assetId}
+                  asset={asset}
+                  projectDir={projectDir}
+                  shouldLoad={shouldLoad}
+                  language={language}
+                  item={item}
+                  selected={selectedAssetIds.includes(assetId)}
+                  onToggleThumbnail={() => toggleThumbnail(assetId)}
+                  onMoveStart={(event) => {
+                    event.stopPropagation();
+                    const movingAssetIds = selectedAssetIds.includes(assetId)
+                      ? selectedAssetIds
+                      : [assetId];
+                    const movingAnnotationIds = selectedAssetIds.includes(assetId)
+                      ? selectedAnnotationIds
+                      : [];
+                    setSelectedAssetIds(movingAssetIds);
+                    setSelectedAnnotationIds(movingAnnotationIds);
+                    setDragState({
+                      kind: "move-items",
+                      assetIds: movingAssetIds,
+                      annotationIds: movingAnnotationIds,
+                      startX: event.clientX,
+                      startY: event.clientY,
+                      initials: Object.fromEntries(
+                        movingAssetIds.map((id) => [
+                          id,
+                          defaultLayoutItem(id, visibleAssetIds.indexOf(id)),
+                        ]),
+                      ),
+                      annotationInitials: Object.fromEntries(
+                        movingAnnotationIds
+                          .map((id) => layout.annotations.find((annotation) => annotation.id === id))
+                          .filter((annotation): annotation is Annotation => Boolean(annotation))
+                          .map((annotation) => [annotation.id, annotation]),
+                      ),
+                    });
+                  }}
+                  onResizeStart={(event) => {
+                    event.stopPropagation();
+                    setDragState({
+                      kind: "resize-item",
+                      assetId,
+                      startX: event.clientX,
+                      startY: event.clientY,
+                      initial: item,
+                    });
+                  }}
+                />
+              );
+            })}
+            {layout.annotations.map((annotation) => (
+              <AnnotationView
+                key={annotation.id}
+                annotation={annotation}
                 language={language}
-                item={item}
-                selected={selectedAssetIds.includes(assetId)}
+                selected={selectedAnnotationIds.includes(annotation.id)}
+                onSelect={() => {
+                  setSelectedAnnotationIds([annotation.id]);
+                  setSelectedAssetIds([]);
+                }}
                 onMoveStart={(event) => {
                   event.stopPropagation();
-                  const movingAssetIds = selectedAssetIds.includes(assetId)
-                    ? selectedAssetIds
-                    : [assetId];
-                  const movingAnnotationIds = selectedAssetIds.includes(assetId)
+                  const movingAnnotationIds = selectedAnnotationIds.includes(annotation.id)
                     ? selectedAnnotationIds
+                    : [annotation.id];
+                  const movingAssetIds = selectedAnnotationIds.includes(annotation.id)
+                    ? selectedAssetIds
                     : [];
+                  setSelectedAnnotationIds(movingAnnotationIds);
                   setSelectedAssetIds(movingAssetIds);
                   setDragState({
                     kind: "move-items",
@@ -748,97 +943,46 @@ export function Canvas({
                     ),
                     annotationInitials: Object.fromEntries(
                       movingAnnotationIds
-                        .map((id) => layout.annotations.find((annotation) => annotation.id === id))
-                        .filter((annotation): annotation is Annotation => Boolean(annotation))
-                        .map((annotation) => [annotation.id, annotation]),
+                        .map((id) => layout.annotations.find((item) => item.id === id))
+                        .filter((item): item is Annotation => Boolean(item))
+                        .map((item) => [item.id, item]),
                     ),
                   });
                 }}
                 onResizeStart={(event) => {
                   event.stopPropagation();
+                  setSelectedAnnotationIds([annotation.id]);
+                  setSelectedAssetIds([]);
                   setDragState({
-                    kind: "resize-item",
-                    assetId,
+                    kind: "resize-annotation",
+                    annotationId: annotation.id,
                     startX: event.clientX,
                     startY: event.clientY,
-                    initial: item,
+                    initial: annotation,
                   });
                 }}
+                onTextChange={(text) => {
+                  updateLayout((current) => ({
+                    ...current,
+                    annotations: current.annotations.map((item) =>
+                      item.id === annotation.id ? { ...item, text } : item,
+                    ),
+                  }));
+                }}
               />
-            );
-          })}
-          {layout.annotations.map((annotation) => (
-            <AnnotationView
-              key={annotation.id}
-              annotation={annotation}
-              language={language}
-              selected={selectedAnnotationIds.includes(annotation.id)}
-              onSelect={() => {
-                setSelectedAnnotationIds([annotation.id]);
-                setSelectedAssetIds([]);
-              }}
-              onMoveStart={(event) => {
-                event.stopPropagation();
-                const movingAnnotationIds = selectedAnnotationIds.includes(annotation.id)
-                  ? selectedAnnotationIds
-                  : [annotation.id];
-                const movingAssetIds = selectedAnnotationIds.includes(annotation.id)
-                  ? selectedAssetIds
-                  : [];
-                setSelectedAnnotationIds(movingAnnotationIds);
-                setDragState({
-                  kind: "move-items",
-                  assetIds: movingAssetIds,
-                  annotationIds: movingAnnotationIds,
-                  startX: event.clientX,
-                  startY: event.clientY,
-                  initials: Object.fromEntries(
-                    movingAssetIds.map((id) => [
-                      id,
-                      defaultLayoutItem(id, visibleAssetIds.indexOf(id)),
-                    ]),
-                  ),
-                  annotationInitials: Object.fromEntries(
-                    movingAnnotationIds
-                      .map((id) => layout.annotations.find((item) => item.id === id))
-                      .filter((item): item is Annotation => Boolean(item))
-                      .map((item) => [item.id, item]),
-                  ),
-                });
-              }}
-              onResizeStart={(event) => {
-                event.stopPropagation();
-                setSelectedAnnotationIds([annotation.id]);
-                setSelectedAssetIds([]);
-                setDragState({
-                  kind: "resize-annotation",
-                  annotationId: annotation.id,
-                  startX: event.clientX,
-                  startY: event.clientY,
-                  initial: annotation,
-                });
-              }}
-              onTextChange={(text) => {
-                updateLayout((current) => ({
-                  ...current,
-                  annotations: current.annotations.map((item) =>
-                    item.id === annotation.id ? { ...item, text } : item,
-                  ),
-                }));
-              }}
-            />
-          ))}
-          {dragState?.kind === "marquee" && (
-            <div
-              className="selectionMarquee"
-              style={normalizedBox(
-                dragState.startX,
-                dragState.startY,
-                dragState.currentX,
-                dragState.currentY,
-              )}
-            />
-          )}
+            ))}
+            {dragState?.kind === "marquee" && (
+              <div
+                className="selectionMarquee"
+                style={normalizedBox(
+                  dragState.startX,
+                  dragState.startY,
+                  dragState.currentX,
+                  dragState.currentY,
+                )}
+              />
+            )}
+          </div>
         </div>
       </div>
     </main>
@@ -854,4 +998,9 @@ function toolLabel(tool: AnnotationTool, language: Language): string {
     pen: "pen",
   };
   return t(language, keys[tool]);
+}
+
+function clampZoom(value: number): number {
+  if (!Number.isFinite(value)) return 1;
+  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
 }

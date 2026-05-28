@@ -4,7 +4,9 @@ import {
   boxesIntersect,
   createAnnotation,
   expandedViewportBox,
+  fitBoxIntoViewport,
   isItemNearViewport,
+  layoutItemsBounds,
   moveAnnotations,
   moveLayoutItems,
   normalizedBox,
@@ -32,6 +34,18 @@ describe("canvas geometry", () => {
     expect(isItemNearViewport({ x: 1600, y: 1200, width: 100, height: 100 }, viewport)).toBe(false);
   });
 
+  it("computes image bounds and fit-to-viewport scroll", () => {
+    const bounds = layoutItemsBounds([
+      { x: 100, y: 80, width: 200, height: 100 },
+      { x: 380, y: 260, width: 120, height: 220 },
+    ]);
+
+    expect(bounds).toEqual({ left: 100, top: 80, width: 400, height: 400 });
+    expect(
+      fitBoxIntoViewport(bounds!, { width: 800, height: 600 }, { minZoom: 0.2, maxZoom: 4, padding: 80 }),
+    ).toEqual({ zoom: 1.1, scrollLeft: 0, scrollTop: 8 });
+  });
+
   it("moves selected images and annotations from their initial positions", () => {
     const item: LayoutItem = {
       assetId: "asset_1",
@@ -43,6 +57,9 @@ describe("canvas geometry", () => {
       z: 1,
       flippedX: true,
       grayscale: true,
+      thumbnail: true,
+      thumbnailOriginalWidth: 240,
+      thumbnailOriginalHeight: 180,
     };
     const annotation = makeAnnotation({ id: "annotation_1", x: 5, y: 6 });
 
@@ -51,6 +68,9 @@ describe("canvas geometry", () => {
       y: 17,
       flippedX: true,
       grayscale: true,
+      thumbnail: true,
+      thumbnailOriginalWidth: 240,
+      thumbnailOriginalHeight: 180,
     });
     expect(moveAnnotations([annotation], { annotation_1: annotation }, 12.4, -3.2)[0]).toMatchObject({
       x: 17,

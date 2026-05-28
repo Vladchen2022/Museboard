@@ -549,10 +549,15 @@ button:disabled {
   background-size: 36px 36px;
 }
 
+.canvasBoardSpace {
+  position: relative;
+}
+
 .canvasBoard {
   position: relative;
   width: 2400px;
   height: 1700px;
+  transform-origin: 0 0;
 }
 
 .emptyCanvas {
