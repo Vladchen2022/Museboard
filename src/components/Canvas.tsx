@@ -262,7 +262,24 @@ export function Canvas({
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
-      if (target?.closest("input, textarea, button, select")) return;
+      const isEditableTarget = Boolean(
+        target?.closest("input, textarea, select, [contenteditable='true']"),
+      );
+
+      if (
+        event.code === "Tab" &&
+        !event.repeat &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !isEditableTarget
+      ) {
+        event.preventDefault();
+        onToggleCleanCanvasMode();
+        return;
+      }
+
+      if (target?.closest("input, textarea, button, select, [contenteditable='true']")) return;
 
       if (event.code === "Space") {
         event.preventDefault();
@@ -334,7 +351,15 @@ export function Canvas({
       window.removeEventListener("keyup", handleKeyUp);
       window.removeEventListener("blur", handleWindowBlur);
     };
-  }, [selectedAssetIds, selectedAnnotationIds, project, selectedNodeId, layout, visibleAssetIds]);
+  }, [
+    selectedAssetIds,
+    selectedAnnotationIds,
+    project,
+    selectedNodeId,
+    layout,
+    visibleAssetIds,
+    onToggleCleanCanvasMode,
+  ]);
 
   useEffect(() => {
     if (dragState === null) return;
@@ -906,7 +931,7 @@ export function Canvas({
           <button
             className={`iconButton ${cleanCanvasMode ? "active" : ""}`}
             type="button"
-            title={t(language, cleanCanvasMode ? "exitCleanCanvas" : "cleanCanvas")}
+            title={`${t(language, cleanCanvasMode ? "exitCleanCanvas" : "cleanCanvas")} (Tab)`}
             aria-pressed={cleanCanvasMode}
             onClick={onToggleCleanCanvasMode}
           >

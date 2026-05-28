@@ -60,9 +60,9 @@ These tests require the user's real machine, at least one configured text model 
 8. Tap `Space` with one image selected. Confirm the image fits the view; tap `Space` again and confirm the previous view returns.
 9. Tap `Space` with no image selected. Confirm all visible images fit the view.
 10. Double-click an image to make it a 75 x 75 thumbnail, then double-click again to restore it.
-11. Enter clean canvas mode.
-12. Confirm only canvas and tools remain visible.
-13. Exit clean canvas mode.
+11. Press `Tab`. Confirm clean canvas mode hides extra UI and leaves the canvas/tools visible.
+12. Press `Tab` again. Confirm the hidden UI returns.
+13. Confirm `Tab` still moves focus normally while editing text fields or text areas.
 
 ## Failure Cases
 

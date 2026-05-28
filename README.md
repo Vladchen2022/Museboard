@@ -56,6 +56,7 @@ Public macOS release still requires Developer ID signing and notarization.
 - `Cmd + =`: zoom in.
 - `Cmd + -`: zoom out.
 - `Cmd + 0`: reset the canvas view.
+- `Tab`: toggle clean canvas mode, hiding or restoring extra UI around the canvas.
 - Hold `Space` and drag: pan the canvas, matching ArtFlex-style navigation.
 - Tap `Space`: fit the selected image group; if nothing is selected, fit all visible images. Tap `Space` again to return to the previous view.
 - Double-click an image: toggle between its normal size and a 75 x 75 thumbnail.
