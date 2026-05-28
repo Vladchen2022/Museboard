@@ -121,6 +121,13 @@ type DragState =
       startY: number;
       currentX: number;
       currentY: number;
+    }
+  | {
+      kind: "pan-viewport";
+      startX: number;
+      startY: number;
+      startScrollLeft: number;
+      startScrollTop: number;
     };
 
 const toolOptions: Array<{ tool: AnnotationTool; label: string; icon: ReactNode }> = [
@@ -152,8 +159,10 @@ export function Canvas({
   const draftLayoutRef = useRef<CanvasLayout | null>(null);
   const zoomRef = useRef(1);
   const focusReturnViewRef = useRef<CanvasViewState | null>(null);
+  const spacePanRef = useRef({ active: false, moved: false });
   const [emptyPromptCenter, setEmptyPromptCenter] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
+  const [spacePanActive, setSpacePanActive] = useState(false);
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
   const [selectedAnnotationIds, setSelectedAnnotationIds] = useState<string[]>([]);
   const [dragState, setDragState] = useState<DragState | null>(null);
@@ -257,7 +266,37 @@ export function Canvas({
 
       if (event.code === "Space") {
         event.preventDefault();
-        toggleSpaceFocusView();
+        if (!event.repeat) {
+          spacePanRef.current = { active: true, moved: false };
+          setSpacePanActive(true);
+        }
+        return;
+      }
+
+      if (event.metaKey) {
+        if (event.key === "=" || event.key === "+") {
+          event.preventDefault();
+          zoomViewportBy(1.2);
+          return;
+        }
+        if (event.key === "-" || event.key === "_") {
+          event.preventDefault();
+          zoomViewportBy(1 / 1.2);
+          return;
+        }
+        if (event.key === "0") {
+          event.preventDefault();
+          resetCanvasView();
+          return;
+        }
+      }
+
+      if (event.key === "Escape") {
+        if (selectedAssetIds.length || selectedAnnotationIds.length) {
+          event.preventDefault();
+          setSelectedAssetIds([]);
+          setSelectedAnnotationIds([]);
+        }
         return;
       }
 
@@ -269,8 +308,32 @@ export function Canvas({
       }
     }
 
+    function handleKeyUp(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      if (event.code !== "Space") return;
+      if (!spacePanRef.current.active && target?.closest("input, textarea, button, select")) return;
+
+      event.preventDefault();
+      const shouldFocus = spacePanRef.current.active && !spacePanRef.current.moved;
+      spacePanRef.current = { active: false, moved: false };
+      setSpacePanActive(false);
+      if (shouldFocus) toggleSpaceFocusView();
+    }
+
+    function handleWindowBlur() {
+      spacePanRef.current = { active: false, moved: false };
+      setSpacePanActive(false);
+      setDragState((current) => (current?.kind === "pan-viewport" ? null : current));
+    }
+
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("blur", handleWindowBlur);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("blur", handleWindowBlur);
+    };
   }, [selectedAssetIds, selectedAnnotationIds, project, selectedNodeId, layout, visibleAssetIds]);
 
   useEffect(() => {
@@ -278,6 +341,21 @@ export function Canvas({
     const activeDrag: NonNullable<DragState> = dragState;
 
     function handleMove(event: PointerEvent) {
+      if (activeDrag.kind === "pan-viewport") {
+        const viewport = canvasRef.current;
+        if (!viewport) return;
+        const dx = event.clientX - activeDrag.startX;
+        const dy = event.clientY - activeDrag.startY;
+        if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
+          spacePanRef.current.moved = true;
+        }
+        viewport.scrollLeft = activeDrag.startScrollLeft - dx;
+        viewport.scrollTop = activeDrag.startScrollTop - dy;
+        focusReturnViewRef.current = null;
+        updateViewportState(viewport);
+        return;
+      }
+
       const scale = zoomRef.current || 1;
       const dx = (event.clientX - activeDrag.startX) / scale;
       const dy = (event.clientY - activeDrag.startY) / scale;
@@ -384,7 +462,7 @@ export function Canvas({
       if (activeDrag.kind === "draw-annotation") {
         onToolChange("select");
       }
-      if (activeDrag.kind !== "marquee") {
+      if (activeDrag.kind !== "marquee" && activeDrag.kind !== "pan-viewport") {
         commitDraftLayout();
       }
       setDragState(null);
@@ -574,17 +652,35 @@ export function Canvas({
   }
 
   function handleViewportWheel(event: React.WheelEvent<HTMLDivElement>) {
-    const viewport = canvasRef.current;
-    if (!viewport) return;
+    if (!canvasRef.current) return;
+
+    focusReturnViewRef.current = null;
+    if (!event.metaKey && !event.ctrlKey) return;
 
     event.preventDefault();
+    const delta = Math.max(-160, Math.min(160, normalizeWheelDelta(event)));
+    const multiplier = Math.exp(-delta * 0.0028);
+    zoomViewportBy(multiplier, { clientX: event.clientX, clientY: event.clientY });
+  }
+
+  function normalizeWheelDelta(event: React.WheelEvent<HTMLDivElement>): number {
+    if (event.deltaMode === 1) return event.deltaY * 16;
+    if (event.deltaMode === 2) return event.deltaY * 480;
+    return event.deltaY;
+  }
+
+  function zoomViewportBy(multiplier: number, anchor?: { clientX: number; clientY: number }) {
+    const viewport = canvasRef.current;
+    if (!viewport || !Number.isFinite(multiplier) || multiplier <= 0) return;
+
     const rect = viewport.getBoundingClientRect();
-    const cursorX = event.clientX - rect.left;
-    const cursorY = event.clientY - rect.top;
+    const cursorX = anchor ? anchor.clientX - rect.left : viewport.clientWidth / 2;
+    const cursorY = anchor ? anchor.clientY - rect.top : viewport.clientHeight / 2;
     const currentZoom = zoomRef.current;
     const boardX = (viewport.scrollLeft + cursorX) / currentZoom;
     const boardY = (viewport.scrollTop + cursorY) / currentZoom;
-    const nextZoom = clampZoom(currentZoom * Math.exp(-event.deltaY * 0.0014));
+    const nextZoom = clampZoom(currentZoom * multiplier);
+    if (Math.abs(nextZoom - currentZoom) < 0.0001) return;
 
     setZoom(nextZoom);
     focusReturnViewRef.current = null;
@@ -593,6 +689,11 @@ export function Canvas({
       viewport.scrollTop = Math.max(0, Math.round(boardY * nextZoom - cursorY));
       updateViewportState(viewport, nextZoom);
     });
+  }
+
+  function resetCanvasView() {
+    focusReturnViewRef.current = null;
+    applyCanvasViewState({ zoom: 1, scrollLeft: 0, scrollTop: 0 });
   }
 
   function applyCanvasViewState(viewState: CanvasViewState) {
@@ -747,6 +848,22 @@ export function Canvas({
     });
   }
 
+  function handleViewportPointerDownCapture(event: React.PointerEvent<HTMLDivElement>) {
+    if (event.button !== 0 || !spacePanRef.current.active) return;
+    const viewport = canvasRef.current;
+    if (!viewport) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    setDragState({
+      kind: "pan-viewport",
+      startX: event.clientX,
+      startY: event.clientY,
+      startScrollLeft: viewport.scrollLeft,
+      startScrollTop: viewport.scrollTop,
+    });
+  }
+
   return (
     <main
       className={`canvasShell ${cleanCanvasMode ? "cleanCanvasMode" : ""}`}
@@ -870,7 +987,12 @@ export function Canvas({
         />
       </div>
 
-      <div ref={canvasRef} className="canvasViewport" onWheel={handleViewportWheel}>
+      <div
+        ref={canvasRef}
+        className={`canvasViewport ${spacePanActive ? "spacePanMode" : ""} ${dragState?.kind === "pan-viewport" ? "panning" : ""}`}
+        onWheel={handleViewportWheel}
+        onPointerDownCapture={handleViewportPointerDownCapture}
+      >
         {visibleAssetIds.length === 0 && (
           <div
             className="emptyCanvas"

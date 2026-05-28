@@ -542,11 +542,24 @@ button:disabled {
   position: relative;
   overflow: auto;
   min-height: 0;
+  overscroll-behavior: contain;
   background:
     linear-gradient(#242424 1px, transparent 1px),
     linear-gradient(90deg, #242424 1px, transparent 1px),
     #191919;
   background-size: 36px 36px;
+}
+
+.canvasViewport.spacePanMode,
+.canvasViewport.spacePanMode .assetItem,
+.canvasViewport.spacePanMode .annotation {
+  cursor: grab;
+}
+
+.canvasViewport.panning,
+.canvasViewport.panning .assetItem,
+.canvasViewport.panning .annotation {
+  cursor: grabbing;
 }
 
 .canvasBoardSpace {

@@ -49,6 +49,17 @@ Public macOS release still requires Developer ID signing and notarization.
 7. Add simple annotations, mirror images, or switch images to black and white when comparing values and silhouettes.
 8. Optionally send the brief to ComfyUI, generate an image, and save the result back into the top-level node.
 
+## Canvas Controls
+
+- Scroll wheel / trackpad scroll: pan around the canvas.
+- `Cmd + scroll` or trackpad pinch: zoom around the pointer.
+- `Cmd + =`: zoom in.
+- `Cmd + -`: zoom out.
+- `Cmd + 0`: reset the canvas view.
+- Hold `Space` and drag: pan the canvas, matching ArtFlex-style navigation.
+- Tap `Space`: fit the selected image group; if nothing is selected, fit all visible images. Tap `Space` again to return to the previous view.
+- Double-click an image: toggle between its normal size and a 75 x 75 thumbnail.
+
 ## User Setup
 
 ### Install From Source

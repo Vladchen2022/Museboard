@@ -53,9 +53,16 @@ These tests require the user's real machine, at least one configured text model 
 1. Drag local images from Finder into a child node.
 2. Drag an image link from a browser into a node.
 3. Use selection box to move several images and annotations together.
-4. Enter clean canvas mode.
-5. Confirm only canvas and tools remain visible.
-6. Exit clean canvas mode.
+4. Use scroll wheel or trackpad scroll to pan the canvas.
+5. Use `Cmd + scroll` or trackpad pinch to zoom around the pointer.
+6. Use `Cmd + =`, `Cmd + -`, and `Cmd + 0` to zoom in, zoom out, and reset view.
+7. Hold `Space` and drag on the canvas. Confirm the canvas pans and images are not moved.
+8. Tap `Space` with one image selected. Confirm the image fits the view; tap `Space` again and confirm the previous view returns.
+9. Tap `Space` with no image selected. Confirm all visible images fit the view.
+10. Double-click an image to make it a 75 x 75 thumbnail, then double-click again to restore it.
+11. Enter clean canvas mode.
+12. Confirm only canvas and tools remain visible.
+13. Exit clean canvas mode.
 
 ## Failure Cases
 
